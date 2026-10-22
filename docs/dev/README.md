@@ -1,6 +1,6 @@
-# FlowBroker 开发文档
+# Heron 开发文档
 
-FlowBroker 当前处于早期阶段，已落地的核心模块是 `mqtt_codec` 与 `mqtt_client`，其余模块处于设计或开发中。
+Heron 当前已经包含单节点 MQTT Broker，以及 `heron_codec` 与 `heron_client`。认证、REST API、规则引擎、Web GUI 和集群仍在设计中。
 
 ## 文档索引
 
@@ -14,7 +14,7 @@ FlowBroker 当前处于早期阶段，已落地的核心模块是 `mqtt_codec` �
 ### 开发指南
 
 - [快速开始](05-quick-start.md) — 获取代码、构建与测试
-- [编解码实现](06-codec-implementation.md) — mqtt_codec 模块说明
+- [编解码实现](06-codec-implementation.md) — heron_codec 模块说明
 - [Broker 实现](07-broker-implementation.md) — Broker 模块设计
 - [插件开发](08-plugin-development.md) — 认证、授权、钩子插件
 

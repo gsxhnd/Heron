@@ -5,7 +5,7 @@
 ## 模块架构
 
 ```
-mqtt_codec/
+heron_codec/
 ├── src/
 │   ├── lib.rs           # 公共 trait 定义
 │   ├── error.rs         # 错误类型定义
@@ -134,7 +134,7 @@ fn decode_variable_length(src: &mut BytesMut) -> Result<u32, Error> {
 ## 测试
 
 ```bash
-cargo test -p mqtt_codec
+cargo test -p heron_codec
 ```
 
-具体使用示例参考 `mqtt_codec/README.md` 和 `mqtt_codec/examples/`。
+具体使用示例参考 `heron_codec/README.md` 和 `heron_codec/examples/`。

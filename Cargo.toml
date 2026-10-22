@@ -3,12 +3,12 @@ resolver = "2"
 members = ["crates/*"]
 
 [workspace.package]
-name = "FlowBroker"
-version = "0.1.0"
+name = "Heron"
+version = "0.2.0"
 authors = ["gsxhnd"]
 homepage = ""
 description = "MQTT Server for v3.1.1 and v5.0 protocols"
-repository = "https://github.com/gsxhnd/FlowBroker"
+repository = "https://github.com/gsxhnd/Heron"
 license = "MIT license"
 categories = ["network"]
 keywords = ["MQTT", "IoT", "messaging", "MQTT Server", "MQTT Broker"]

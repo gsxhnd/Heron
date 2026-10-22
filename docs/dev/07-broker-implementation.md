@@ -1,6 +1,6 @@
 # Broker 实现指南
 
-> 状态: 设计草案。当前仓库尚未提供 Broker crate。
+> 状态: 已实现。入口是 `heron`，监听在 `heron_mqtt`，会话与路由在 `heron_core`，PostgreSQL 在 `heron_storage`。
 
 ## 目标模块
 

@@ -1,0 +1,19 @@
+[package]
+name = "heron_storage"
+version = "0.2.0"
+edition = "2024"
+authors.workspace = true
+description = "Heron 的 SeaORM PostgreSQL 持久化"
+repository.workspace = true
+license.workspace = true
+categories.workspace = true
+keywords.workspace = true
+exclude.workspace = true
+
+[dependencies]
+heron_core = { path = "../heron_core" }
+async-trait = "0.1"
+bytes = { workspace = true }
+chrono = "0.4"
+sea-orm = { version = "1.1", features = ["sqlx-postgres", "runtime-tokio-rustls", "with-chrono"] }
+tracing = "0.1"

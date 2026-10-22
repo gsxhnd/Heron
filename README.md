@@ -1,33 +1,49 @@
-# FlowBroker
+# Heron
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-FlowBroker 是一个使用 Rust 编写的 MQTT 项目，目标是逐步演进为完整的 Broker、API、插件系统和管理界面。
+Heron 是一个使用 Rust 编写的 MQTT 项目，目标是逐步演进为完整的 Broker、API、插件系统和管理界面。
 
 ## 当前状态
 
-当前仓库已经落地的核心库包括：
+当前仓库已经落地的模块包括：
 
 | Crate | 说明 |
 |-------|------|
-| `mqtt_codec` | MQTT v3.1.1 / v5.0 控制报文编解码与协议校验 |
-| `mqtt_client` | 异步 MQTT 客户端（开发中） |
+| `heron_codec` | MQTT v3.1.1 / v5.0 控制报文编解码与协议校验 |
+| `heron_client` | 异步 MQTT 客户端（TCP/TLS、自动重连、QoS 0/1/2、v3.1.1 与 v5.0） |
+| `heron_core` | 会话、主题树、QoS 0/1/2 路由与存储接口 |
+| `heron_mqtt` | TCP 与 WebSocket 接入 |
+| `heron_storage` | SeaORM + PostgreSQL 持久化 |
+| `heron` | 单节点 Broker 进程 |
 
-- 已实现：`mqtt_codec` 编解码、校验、Builder、集成测试与示例
-- 规划中：Broker 主程序、REST API、Web GUI、Docker 与集群能力
+- 已实现：单节点 Broker（TCP/WebSocket、会话、主题、QoS 0/1/2、保留消息、遗嘱、内存或 PostgreSQL 持久化）
+- 已实现：`heron_codec` 编解码，以及 `heron_client` 发布/订阅、TLS、自动重连
+- 规划中：认证与 ACL、REST API、Web GUI、Docker 与集群
 
-这意味着当前仓库不能直接启动 `flow_broker` Broker 服务。
+```bash
+cargo run -p heron
+cargo run -p heron_client -- sub -H 127.0.0.1 -p 1883 -t test/#
+```
 
 ## 快速开始
 
 ```bash
-git clone https://github.com/gsxhnd/FlowBroker.git
-cd FlowBroker
+git clone https://github.com/gsxhnd/Heron.git
+cd Heron
 cargo build --workspace
-cargo test -p mqtt_codec
+cargo test --workspace
 ```
 
-更详细的说明见 [docs/dev/README.md](docs/dev/README.md) 与 [crates/mqtt_codec/README.md](crates/mqtt_codec/README.md)。
+使用命令行客户端前，先在另一个终端启动 Broker：
+
+```bash
+cargo run -p heron
+cargo run -p heron_client -- pub -t test/topic -m hello -q 1
+cargo run -p heron_client -- --protocol v5 sub -H 127.0.0.1 -t test/#
+```
+
+更详细的说明见 [docs/dev/README.md](docs/dev/README.md) 与 [crates/heron_codec/README.md](crates/heron_codec/README.md)。
 
 ## 文档入口
 
@@ -39,12 +55,17 @@ cargo test -p mqtt_codec
 ## 当前项目结构
 
 ```text
-FlowBroker/
+Heron/
 ├── crates/
-│   ├── mqtt_codec/   # MQTT 编解码库
-│   └── mqtt_client/  # MQTT 客户端库
-├── docs/dev/         # 设计与开发文档
-└── Cargo.toml        # workspace 配置
+│   ├── heron_codec/          # MQTT 编解码库
+│   ├── heron_client/         # MQTT 客户端库（库 + CLI + 集成测试）
+│   ├── heron_core/    # 会话、主题树与路由
+│   ├── heron_mqtt/    # TCP / WebSocket
+│   ├── heron_storage/ # SeaORM + PostgreSQL
+│   └── heron/         # Broker 进程
+├── conf/broker.yaml         # 示例配置
+├── docs/dev/                # 设计与开发文档
+└── Cargo.toml               # workspace 配置
 ```
 
 ## 目标技术方向

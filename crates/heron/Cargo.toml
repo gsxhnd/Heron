@@ -1,0 +1,26 @@
+[package]
+name = "heron"
+version = "0.2.0"
+edition = "2024"
+authors.workspace = true
+description = "Heron 单节点 MQTT Broker"
+repository.workspace = true
+license.workspace = true
+categories.workspace = true
+keywords.workspace = true
+exclude.workspace = true
+
+[[bin]]
+name = "heron"
+path = "src/main.rs"
+
+[dependencies]
+heron_core = { path = "../heron_core" }
+heron_mqtt = { path = "../heron_mqtt" }
+heron_storage = { path = "../heron_storage" }
+tokio = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

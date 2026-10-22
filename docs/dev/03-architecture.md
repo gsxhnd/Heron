@@ -1,12 +1,12 @@
 # 系统架构
 
-> 状态: 设计草案。除 `mqtt_codec` 外，其余模块处于设计或规划阶段。
+> 状态: 单节点 Broker 已实现。REST API、规则引擎、Web GUI 与 Raft 仍为设计。
 
 ## 整体架构
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                      FlowBroker MQTT Server                     │
+│                      Heron MQTT Server                     │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
@@ -27,7 +27,7 @@
 │  ┌────────────────────────────────────────────────────────────┐  │
 │  │                    Protocol Layer                          │  │
 │  │  ┌─────────────────────┐  ┌─────────────────────────────┐  │  │
-│  │  │  mqtt_codec (v4)    │  │     mqtt_codec (v5)         │  │  │
+│  │  │  heron_codec (v4)    │  │     heron_codec (v5)         │  │  │
 │  │  │  - Encoder/Decoder  │  │  - Encoder/Decoder          │  │  │
 │  │  │  - Packet Types     │  │  - Properties Support       │  │  │
 │  │  └─────────────────────┘  └─────────────────────────────┘  │  │
@@ -52,46 +52,43 @@
 
 ## 模块划分
 
-### mqtt_codec (协议层) — 已完成
+### heron_codec (协议层) — 已完成
 
 - v4 模块: MQTT v3.1.1 协议支持
 - v5 模块: MQTT v5.0 协议支持
 
-### flow_broker_core (Broker 核心) — 开发中
+### heron_core / heron_mqtt / heron_storage — 已实现
 
-- Server: TCP/WebSocket 服务器
-- Session Manager: 客户端会话管理
-- Topic Manager: 主题树管理
-- Subscription Manager: 订阅关系管理
-- Message Router: 消息路由和分发
-- Storage: 持久化层接口
+- TCP 与 WebSocket 监听，按 CONNECT 选择 v3.1.1 或 v5.0 编解码
+- 会话、主题树、订阅与 QoS 0/1/2 路由
+- `Storage` 接口：默认内存实现，PostgreSQL 由 SeaORM 写入
 
-### flow_broker_auth (认证授权) — 计划中
+### heron_auth (认证授权) — 计划中
 
 - Authenticator: 认证接口和实现
 - Authorizer: 授权接口和实现
 - Plugin System: 插件加载和管理
 
-### flow_broker_rules (规则引擎) — 计划中
+### heron_rules (规则引擎) — 计划中
 
 - Rule Parser: 规则解析器
 - Rule Engine: 规则执行引擎
 - Actions: 动作执行器
 - Hooks: 钩子系统
 
-### flow_broker_api (REST API) — 计划中
+### heron_api (REST API) — 计划中
 
 - Routes: API 路由定义
 - Handlers: 请求处理器
 - Metrics: Prometheus 指标导出
 
-### flow_broker_cluster (集群模块) — 计划中
+### heron_cluster (集群模块) — 计划中
 
 - Raft: 共识协议实现
 - gRPC: 节点间通信 (Tonic)
 - Sync: 状态同步
 
-### flow_broker_web (Web GUI) — 计划中
+### heron_web (Web GUI) — 计划中
 
 - Vue 3 + Reka UI + Pinia + WebSocket
 
@@ -149,7 +146,7 @@ Client A (Publisher)
 
 ```
 ┌─────────────────────┐
-│  FlowBroker Server  │
+│  Heron Server  │
 │  MQTT  : 1883       │
 │  MQTTS : 8883       │
 │  WS    : 8083       │

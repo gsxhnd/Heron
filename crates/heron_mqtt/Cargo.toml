@@ -1,0 +1,30 @@
+[package]
+name = "heron_mqtt"
+version = "0.2.0"
+edition = "2024"
+authors.workspace = true
+description = "Heron TCP 与 WebSocket 接入"
+repository.workspace = true
+license.workspace = true
+categories.workspace = true
+keywords.workspace = true
+exclude.workspace = true
+
+[dependencies]
+heron_core = { path = "../heron_core" }
+heron_codec = { path = "../heron_codec" }
+bytes = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-tungstenite = "0.27"
+futures-util = "0.3"
+tracing = "0.1"
+
+[dev-dependencies]
+heron_core = { path = "../heron_core" }
+heron_client = { path = "../heron_client" }
+heron_codec = { path = "../heron_codec" }
+bytes = { workspace = true }
+tokio = { workspace = true }
+tokio-tungstenite = "0.27"
+futures-util = "0.3"

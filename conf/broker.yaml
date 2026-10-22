@@ -1,0 +1,10 @@
+tcp:
+  enabled: true
+  bind: "0.0.0.0:1883"
+websocket:
+  enabled: true
+  bind: "0.0.0.0:8083"
+storage:
+  kind: memory
+  # kind: postgres
+  # url: postgres://heron:heron@127.0.0.1:5432/heron

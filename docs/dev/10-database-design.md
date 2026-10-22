@@ -1,6 +1,6 @@
 # 数据库设计
 
-> 状态: 设计草案。当前仓库未接入 PostgreSQL 或 SeaORM。
+> 状态: `heron_storage` 已用 SeaORM 创建并读写下列核心表。`ip_address` 存为 `VARCHAR`，订阅表增加 MQTT v5 选项，`messages` 增加 `direction`，`clients` 增加 `will_delay`。认证、规则和统计表仍未建。
 
 ## 核心表
 
