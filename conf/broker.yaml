@@ -40,7 +40,7 @@ wss:
 #       allow: true
 
 api:
-  enabled: false
+  enabled: true
   bind: "0.0.0.0:8080"
   # token: change-me
   # 也可用环境变量 HERON_API_TOKEN 覆盖

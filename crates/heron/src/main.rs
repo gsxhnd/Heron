@@ -116,14 +116,24 @@ fn default_client_auth() -> String {
     "none".to_owned()
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize)]
 struct ApiFile {
-    #[serde(default)]
+    #[serde(default = "default_true")]
     enabled: bool,
     #[serde(default)]
     bind: String,
     #[serde(default)]
     token: Option<String>,
+}
+
+impl Default for ApiFile {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            bind: String::new(),
+            token: None,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]

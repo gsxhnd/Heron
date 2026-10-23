@@ -1,6 +1,6 @@
 # 系统架构
 
-> 状态: 单节点 Broker、TLS、认证授权与 REST API 已实现。规则引擎、Web GUI 与 Raft 仍为设计。
+> 状态: 单节点 Broker、TLS、认证授权、REST API 与 Web GUI 已实现。规则引擎与 Raft 仍为设计。
 
 ## 整体架构
 
@@ -11,7 +11,7 @@
 │                                                                 │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
 │  │  Web GUI    │  │  REST API   │  │     MQTT Broker         │  │
-│  │  (Vue 3)    │  │  (Axum)     │  │   (TCP/WebSocket)       │  │
+│  │  (React)    │  │  (Axum)     │  │   (TCP/WebSocket)       │  │
 │  └──────┬──────┘  └──────┬──────┘  └───────────┬─────────────┘  │
 │         │                │                     │                │
 │  ┌──────┴────────────────┴─────────────────────┴─────────────┐  │
@@ -88,9 +88,10 @@
 - gRPC: 节点间通信 (Tonic)
 - Sync: 状态同步
 
-### heron_web (Web GUI) — 计划中
+### web (Web GUI) — 已实现
 
-- Vue 3 + Reka UI + Pinia + WebSocket
+- React + Zustand + TanStack Router + shadcn/ui
+- 通过 `GET /api/v1/events` 接收每秒快照和连接变化
 
 ## 数据流
 

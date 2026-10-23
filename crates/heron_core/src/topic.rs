@@ -131,6 +131,11 @@ impl TopicTree {
         found
     }
 
+    /// Retained message stored at an exact topic name.
+    pub fn retained_message(&self, topic: &str) -> Option<&Retained> {
+        self.retained.get(topic)
+    }
+
     /// Topics that currently hold a retained message.
     pub fn retained_topics(&self) -> Vec<String> {
         let mut topics: Vec<String> = self.retained.keys().cloned().collect();

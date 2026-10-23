@@ -1,6 +1,6 @@
 # UI 设计
 
-> 状态: 设计草案。当前仓库未包含前端实现。
+> 状态: 管理界面在 `web/`。技术栈已改为 React；页面以当前 Broker 能力为准，集群页属于 v0.7.0，尚未实现。
 
 ## 设计目标
 
@@ -13,10 +13,11 @@
 
 | 组件 | 技术 |
 |------|------|
-| 框架 | Vue 3 |
-| UI 库 | Reka UI |
-| 图表 | ECharts |
-| 状态管理 | Pinia |
+| 框架 | React |
+| UI 库 | shadcn/ui |
+| 路由 | TanStack Router |
+| 图表 | Recharts（shadcn Chart） |
+| 状态管理 | Zustand |
 | 构建工具 | Vite |
 
 ## 页面结构

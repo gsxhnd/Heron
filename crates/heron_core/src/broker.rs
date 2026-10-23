@@ -92,6 +92,19 @@ pub struct ClientSnapshot {
     pub username: Option<String>,
     /// Keep-alive seconds from CONNECT.
     pub keep_alive: u16,
+    /// MQTT 3.1.1 Clean Session, or MQTT 5.0 Clean Start.
+    pub clean_start: bool,
+    /// Session expiry interval in seconds. `Some(0)` ends the session on disconnect.
+    pub session_expiry: Option<u32>,
+}
+
+/// Retained payload for one exact topic name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RetainedSnapshot {
+    /// Application payload. Empty payloads are deleted and are not returned.
+    pub payload: Bytes,
+    /// QoS stored with the retained message.
+    pub qos: u8,
 }
 
 /// A topic filter or retained topic.
@@ -373,19 +386,28 @@ impl Broker {
     /// Connected and persistent sessions, sorted by client id.
     ///
     /// `page` is 1-based. `page_size` is clamped to 1..=200.
+    /// `client_id` keeps sessions whose identifier contains that substring.
+    /// `protocol_version` keeps sessions at protocol level 4 or 5.
     pub fn list_clients(
         &self,
         connected: Option<bool>,
+        client_id: Option<&str>,
+        protocol_version: Option<u8>,
         page: usize,
         page_size: usize,
     ) -> (usize, Vec<ClientSnapshot>) {
         let page_size = page_size.clamp(1, 200);
         let page = page.max(1);
+        let needle = client_id.filter(|value| !value.is_empty());
         let state = self.lock();
         let mut clients: Vec<ClientSnapshot> = state
             .sessions
             .values()
             .filter(|session| connected.is_none_or(|flag| session.connected == flag))
+            .filter(|session| needle.is_none_or(|query| session.client_id.contains(query)))
+            .filter(|session| {
+                protocol_version.is_none_or(|level| session.protocol.level() == level)
+            })
             .map(client_snapshot)
             .collect();
         clients.sort_by(|left, right| left.client_id.cmp(&right.client_id));
@@ -441,6 +463,18 @@ impl Broker {
         let mut listed: Vec<TopicSnapshot> = topics.into_values().collect();
         listed.sort_by(|left, right| left.topic.cmp(&right.topic));
         listed
+    }
+
+    /// Retained payload stored at an exact topic name.
+    pub fn retained(&self, topic: &str) -> Option<RetainedSnapshot> {
+        let state = self.lock();
+        state
+            .topics
+            .retained_message(topic)
+            .map(|message| RetainedSnapshot {
+                payload: message.payload.clone(),
+                qos: message.qos.as_u8(),
+            })
     }
 
     /// Every installed subscription.
@@ -1345,6 +1379,8 @@ fn client_snapshot(session: &Session) -> ClientSnapshot {
         connected_at_ms: session.connected_at_ms,
         username: session.username.clone(),
         keep_alive: session.keep_alive,
+        clean_start: session.clean_start,
+        session_expiry: session.session_expiry,
     }
 }
 

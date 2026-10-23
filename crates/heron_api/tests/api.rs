@@ -1,13 +1,17 @@
 //! HTTP coverage for the management API.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use heron_api::router;
+use futures_util::StreamExt;
+use heron_api::{ApiServer, router};
 use heron_core::{Broker, BrokerConfig, ConnectRequest, MemoryStorage, ProtocolVersion};
 use http_body_util::BodyExt;
-use serde_json::Value;
+use serde_json::{Value, json};
+use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::Message;
 use tower::ServiceExt;
 
 async fn broker() -> Broker {
@@ -215,4 +219,278 @@ async fn delete_client_should_return_not_found_when_the_session_is_offline() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     let body = body_json(response).await;
     assert_eq!(body["error"]["code"], "not_found");
+}
+
+#[tokio::test]
+async fn client_list_should_filter_by_identifier_and_protocol_and_expose_session_fields() {
+    let broker = broker().await;
+    let mut v5 = connect("sensor-west");
+    v5.protocol = ProtocolVersion::V5;
+    v5.clean_start = false;
+    v5.session_expiry = Some(120);
+    broker.connect(connect("sensor-east")).await.expect("v4");
+    broker.connect(v5).await.expect("v5");
+    let app = router(broker, None);
+
+    let listed = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/clients?client_id=west&protocol=5")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("clients");
+    let listed = body_json(listed).await;
+    assert_eq!(listed["total"], 1);
+    assert_eq!(listed["data"][0]["client_id"], "sensor-west");
+    assert_eq!(listed["data"][0]["clean_start"], false);
+    assert_eq!(listed["data"][0]["session_expiry"], 120);
+}
+
+#[tokio::test]
+async fn topic_detail_should_return_retained_text_and_clear_when_an_empty_retain_is_published() {
+    let app = router(broker().await, None);
+    let published = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/topics/sensors/temp/publish")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"payload":"21","qos":0,"retain":true}"#))
+                .expect("request"),
+        )
+        .await
+        .expect("publish");
+    assert_eq!(published.status(), StatusCode::OK);
+
+    let detail = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/topics/sensors/temp")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("detail");
+    let detail = body_json(detail).await;
+    assert_eq!(detail["data"]["payload_text"], "21");
+    assert_eq!(detail["data"]["payload_hex"], "3231");
+    assert_eq!(detail["data"]["retained"], true);
+
+    let cleared = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/topics/sensors/temp/publish")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"payload":"","qos":0,"retain":true}"#))
+                .expect("request"),
+        )
+        .await
+        .expect("clear");
+    assert_eq!(cleared.status(), StatusCode::OK);
+
+    let after = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/topics/sensors/temp")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("after");
+    assert_eq!(after.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn rules_should_round_trip_in_memory_and_report_that_the_engine_is_inactive() {
+    let app = router(broker().await, Some("secret".to_owned()));
+    let denied = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/rules")
+                .header("content-type", "application/json")
+                .body(Body::from(rule_body("forward")))
+                .expect("request"),
+        )
+        .await
+        .expect("denied");
+    assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+
+    let created = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/rules")
+                .header("authorization", "Bearer secret")
+                .header("content-type", "application/json")
+                .body(Body::from(rule_body("forward")))
+                .expect("request"),
+        )
+        .await
+        .expect("created");
+    assert_eq!(created.status(), StatusCode::OK);
+    let created = body_json(created).await;
+    assert_eq!(created["engine"], "inactive");
+    assert_eq!(created["data"]["name"], "forward");
+    let id = created["data"]["id"].as_u64().expect("id");
+
+    let invalid = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/rules")
+                .header("authorization", "Bearer secret")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"name":"bad-filter","topic_filter":"a/#/b","actions":[{"type":"log"}]}"#,
+                ))
+                .expect("request"),
+        )
+        .await
+        .expect("invalid");
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+
+    let updated = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/api/v1/rules/{id}"))
+                .header("authorization", "Bearer secret")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"name":"forward","enabled":false,"priority":5,"topic_filter":"sensors/#","conditions":{"gt":1},"actions":[{"type":"log"}]}"#,
+                ))
+                .expect("request"),
+        )
+        .await
+        .expect("updated");
+    assert_eq!(updated.status(), StatusCode::OK);
+    assert_eq!(body_json(updated).await["data"]["enabled"], false);
+
+    let listed = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/rules")
+                .header("authorization", "Bearer secret")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("listed");
+    let listed = body_json(listed).await;
+    assert_eq!(listed["data"][0]["priority"], 5);
+    assert_eq!(listed["engine"], "inactive");
+
+    let deleted = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/api/v1/rules/{id}"))
+                .header("authorization", "Bearer secret")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("deleted");
+    assert_eq!(deleted.status(), StatusCode::OK);
+    assert_eq!(body_json(deleted).await["data"]["deleted"], true);
+}
+
+#[tokio::test]
+async fn events_socket_should_require_a_token_and_push_a_snapshot_then_a_connect_notice() {
+    let broker = broker().await;
+    let server = ApiServer::bind(
+        broker.clone(),
+        "127.0.0.1:0".parse().expect("addr"),
+        Some("secret".to_owned()),
+    )
+    .await
+    .expect("bind");
+    let addr = server.local_addr().expect("local");
+    tokio::spawn(async move {
+        let _ = server.serve(std::future::pending()).await;
+    });
+
+    let denied = connect_async(format!("ws://{addr}/api/v1/events")).await;
+    assert!(denied.is_err(), "missing token should be rejected");
+
+    let (mut socket, _) = connect_async(format!("ws://{addr}/api/v1/events?token=secret"))
+        .await
+        .expect("socket");
+    let first = next_text(&mut socket).await;
+    let snapshot: Value = serde_json::from_str(&first).expect("snapshot json");
+    assert_eq!(snapshot["type"], "snapshot");
+    assert_eq!(snapshot["connections"], 0);
+
+    broker.connect(connect("live-1")).await.expect("connect");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(4);
+    let mut saw_connect = false;
+    while tokio::time::Instant::now() < deadline {
+        let message = tokio::time::timeout(Duration::from_secs(2), next_text(&mut socket))
+            .await
+            .expect("timed out waiting for a client event");
+        let event: Value = serde_json::from_str(&message).expect("event json");
+        if event["type"] == "client" && event["action"] == "connected" {
+            assert_eq!(event["client_id"], "live-1");
+            saw_connect = true;
+            break;
+        }
+    }
+    assert!(saw_connect, "expected a connected client event");
+}
+
+#[tokio::test]
+async fn options_should_advertise_cors_for_the_management_gui() {
+    let app = router(broker().await, None);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("OPTIONS")
+                .uri("/api/v1/clients")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("options");
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        response
+            .headers()
+            .get("access-control-allow-origin")
+            .and_then(|value| value.to_str().ok()),
+        Some("*")
+    );
+}
+
+fn rule_body(topic_filter: &str) -> String {
+    json!({
+        "name": "forward",
+        "topic_filter": topic_filter,
+        "actions": [{"type": "log"}],
+    })
+    .to_string()
+}
+
+async fn next_text<S>(socket: &mut tokio_tungstenite::WebSocketStream<S>) -> String
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    loop {
+        let frame = socket.next().await.expect("frame").expect("ws message");
+        if let Message::Text(text) = frame {
+            return text.to_string();
+        }
+    }
 }

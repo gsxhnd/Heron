@@ -16,7 +16,8 @@ mod storage;
 mod topic;
 
 pub use broker::{
-    Broker, BrokerConfig, BrokerStatus, ClientSnapshot, SubscriptionSnapshot, TopicSnapshot,
+    Broker, BrokerConfig, BrokerStatus, ClientSnapshot, RetainedSnapshot, SubscriptionSnapshot,
+    TopicSnapshot,
 };
 pub use error::{
     ClientFlow, ConnectError, CoreError, PublishError, SubscribeAck, SubscribeFailure,
@@ -31,4 +32,4 @@ pub use storage::{
     Direction, MessageState, Storage, StoredClient, StoredMessage, StoredRetained,
     StoredSubscription, WriteOp,
 };
-pub use topic::{topic_matches, valid_topic_name};
+pub use topic::{FilterClass, classify_filter, topic_matches, valid_topic_name};

@@ -1,6 +1,6 @@
 # API 设计
 
-> 状态: v0.4.0 已实现下列 REST 路由、健康检查和 Prometheus 文本指标。gRPC 仍未实现。管理 API 与 MQTT 监听分开绑定。配置了 `api.token`（或环境变量 `HERON_API_TOKEN`）时，`/api/v1` 管理路由和 `/metrics` 要求 Bearer Token。`/health` 与 `/api/v1/system/health` 保持开放。
+> 状态: 已实现下列 REST 路由、健康检查、Prometheus 文本指标，以及 `GET /api/v1/events` WebSocket。gRPC 仍未实现。管理 API 与 MQTT 监听分开绑定。配置了 `api.token`（或环境变量 `HERON_API_TOKEN`）时，`/api/v1` 管理路由和 `/metrics` 要求 Bearer Token。`/health` 与 `/api/v1/system/health` 保持开放。WebSocket 额外接受查询参数 `token`，因为浏览器不能在升级请求上设置 `Authorization`。
 
 ## 设计目标
 
@@ -72,10 +72,12 @@
 ### 客户端管理
 
 ```http
-GET    /clients              # 列表 (支持 page, page_size, connected 参数)
+GET    /clients              # 列表 (支持 page, page_size, connected, client_id, protocol 参数)
 GET    /clients/{client_id}  # 详情
 DELETE /clients/{client_id}  # 断开连接
 ```
+
+详情额外包含 `keep_alive`、`clean_start` 和 `session_expiry`。
 
 响应示例:
 
@@ -100,8 +102,11 @@ DELETE /clients/{client_id}  # 断开连接
 
 ```http
 GET  /topics                    # 主题列表
+GET  /topics/{topic}            # 主题详情，含保留载荷
 POST /topics/{topic}/publish    # 发布消息
 ```
+
+空载荷且 `retain: true` 会删除保留消息。详情在载荷是 UTF-8 时返回 `payload_text`，并总是在有保留消息时返回 `payload_hex`。
 
 发布请求体:
 
@@ -134,7 +139,7 @@ GET /metrics             # Prometheus 指标 (根路径)
 }
 ```
 
-### 规则管理 (v0.5.0+)
+### 规则配置
 
 ```http
 GET    /rules
@@ -142,6 +147,16 @@ POST   /rules
 PUT    /rules/{rule_id}
 DELETE /rules/{rule_id}
 ```
+
+规则保存在管理进程内存中，重启后清空。成功响应包含 `"engine": "inactive"`：记录可以配置，但当前 Broker 不会按这些规则处理消息。
+
+### 实时推送
+
+```http
+GET /api/v1/events
+```
+
+WebSocket 文本帧。连接后每秒一条 `type: snapshot`，字段包括连接数、会话数、收发计数、每秒速率、主题数和订阅数。第一条快照建立在线客户端基线，之后在线集合变化时发送 `type: client`，`action` 为 `connected` 或 `disconnected`。
 
 ## gRPC (集群节点间通信)
 

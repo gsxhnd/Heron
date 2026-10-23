@@ -6,7 +6,7 @@ Focused guidance for AI coding agents working in this repository.
 
 ## Project
 
-Heron — Rust MQTT broker. The workspace contains `mqtt_codec`, `mqtt_client`, and a single-node broker: `heron_core` (sessions, topic tree, QoS routing), `heron_mqtt` (TCP and WebSocket), `heron_storage` (SeaORM + PostgreSQL), and the `heron` binary. Authentication, REST API, rules, Web GUI, and Raft are still planned (see [docs/dev/](docs/dev/)).
+Heron — Rust MQTT broker. The workspace contains `mqtt_codec`, `mqtt_client`, and a single-node broker: `heron_core` (sessions, topic tree, QoS routing), `heron_mqtt` (TCP and WebSocket), `heron_storage` (SeaORM + PostgreSQL), `heron_api`, and the `heron` binary. The management UI lives in `web/`. Rule execution and Raft are still planned (see [docs/dev/](docs/dev/)).
 
 ## Current workspace layout
 
@@ -35,9 +35,10 @@ crates/
   heron_core/ # sessions, topic tree, QoS 0/1/2 router, Storage trait
   heron_auth/ # password, token, client-certificate auth, ACL
   heron_mqtt/ # TCP, WebSocket, and TLS listeners
-  heron_api/ # Axum REST API, health checks, Prometheus
+  heron_api/ # Axum REST API, health checks, Prometheus, management WebSocket
   heron_storage/ # SeaORM PostgreSQL implementation of Storage
   heron/      # binary: `--config`, YAML, tokio runtime
+web/                # React management UI (Zustand, TanStack Router, shadcn/ui)
 conf/broker.yaml    # example listener and storage config
 docs/dev/           # design docs
 ```
@@ -52,6 +53,8 @@ docs/dev/           # design docs
 | Test client | `cargo test -p mqtt_client` |
 | Test broker | `cargo test -p heron_core -p heron_mqtt` |
 | Run broker | `cargo run -p heron -- --config conf/broker.yaml` |
+| Web GUI | `cd web && npm install && npm run dev` |
+| Web tests | `cd web && npm test` |
 | Lint | `cargo clippy --all-targets --all-features --locked -- -D warnings` |
 | Format | `cargo fmt` |
 | Run example | `cargo run -p mqtt_codec --example v4_encode` |
@@ -130,12 +133,13 @@ Use `-p mqtt_codec` or `-p mqtt_client` to scope work to a specific crate.
 | `heron` | Binary: `--config`, YAML, tokio runtime |
 | `heron_mqtt` | TCP、WebSocket 和 TLS 监听。CONNECT 选择 v3.1.1 或 v5.0 编解码 |
 | `heron_auth` | 用户名/密码、Token、客户端证书与 ACL |
-| `heron_api` | REST、健康检查、Prometheus |
+| `heron_api` | REST、健康检查、Prometheus、管理 WebSocket |
+| `web` | React 管理界面。开发服务器把 `/api` 代理到 `:8080` |
 | `heron_core` | Sessions, topic tree, QoS 0/1/2 routing, `Storage` trait, in-memory store |
 | `heron_storage` | SeaORM + PostgreSQL. Creates tables on connect |
 | `mqtt_codec` | Packet encode/decode |
 
-Run: `cargo run -p heron -- --config conf/broker.yaml`. Default listeners are TCP `:1883` and WebSocket `:8083` with in-memory storage. TLS, authentication, and the management API stay off until `conf/broker.yaml` enables them. Raft is not in this version.
+Run: `cargo run -p heron -- --config conf/broker.yaml`. Default listeners are TCP `:1883`, WebSocket `:8083`, and the management API `:8080` with in-memory storage. TLS and authentication stay off until `conf/broker.yaml` enables them. Raft is not in this version.
 
 ## Later architecture
 

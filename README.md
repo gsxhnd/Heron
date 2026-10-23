@@ -22,7 +22,8 @@ Heron 是一个使用 Rust 编写的 MQTT 项目，目标是逐步演进为完�
 - 已实现：单节点 Broker（TCP/WebSocket/TLS、会话、主题、QoS 0/1/2、保留消息、遗嘱、内存或 PostgreSQL 持久化）
 - 已实现：用户名/密码、Token、客户端证书认证与 ACL；管理 REST API、健康检查和 Prometheus
 - 已实现：`mqtt_codec` 编解码，以及 `mqtt_client` 发布/订阅、TLS、自动重连
-- 规划中：规则引擎、Web GUI、Docker 与集群
+- 已实现：`web/` 管理界面（React、Zustand、TanStack Router、shadcn/ui）
+- 规划中：规则引擎执行、Docker 与集群
 
 ```bash
 cargo run -p heron
@@ -74,7 +75,7 @@ Heron/
 ## 目标技术方向
 
 - 后端: Rust、Tokio、Axum、Tonic、SeaORM、PostgreSQL
-- 前端: Vue 3、Reka UI、Pinia、Vite
+- 前端: React、Zustand、TanStack Router、shadcn/ui、Vite
 
 ## 贡献
 

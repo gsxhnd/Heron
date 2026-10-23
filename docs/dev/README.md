@@ -1,6 +1,6 @@
 # Heron 开发文档
 
-Heron 当前已经包含单节点 MQTT Broker、认证与 ACL、管理 REST API，以及 `mqtt_codec` 与 `mqtt_client`。规则引擎、Web GUI 和集群仍在设计中。
+Heron 当前已经包含单节点 MQTT Broker、认证与 ACL、管理 REST API、Web GUI，以及 `mqtt_codec` 与 `mqtt_client`。规则引擎和集群仍在设计中。
 
 ## 文档索引
 

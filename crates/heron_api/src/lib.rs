@@ -3,18 +3,23 @@
 //! Authenticated routes live under `/api/v1` and use a bearer token when one is
 //! configured. `GET /health` and `GET /api/v1/system/health` stay open for probes.
 //! `GET /metrics` exposes Prometheus text and follows the same bearer rule as the
-//! management routes.
+//! management routes. `GET /api/v1/events` is a WebSocket that also accepts
+//! `?token=` because browsers cannot set `Authorization` on the upgrade.
+
+mod events;
+mod rules;
 
 use std::future::Future;
 use std::net::SocketAddr;
+use std::sync::{Arc, Mutex};
 
 use axum::Json;
 use axum::Router;
 use axum::extract::{Path, Query, State};
-use axum::http::{StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, put};
 use bytes::Bytes;
 use chrono::{DateTime, SecondsFormat};
 use heron_core::{Broker, ClientSnapshot, IncomingPublish, PublishError, QoS};
@@ -62,7 +67,11 @@ impl ApiServer {
 
 /// Router used by [`ApiServer`] and tests.
 pub fn router(broker: Broker, token: Option<String>) -> Router {
-    let state = AppState { broker, token };
+    let state = AppState {
+        broker,
+        token,
+        rules: Arc::new(Mutex::new(rules::RuleStore::new())),
+    };
     let protected = Router::new()
         .route("/metrics", get(metrics))
         .route("/api/v1/clients", get(list_clients))
@@ -71,9 +80,18 @@ pub fn router(broker: Broker, token: Option<String>) -> Router {
             get(get_client).delete(delete_client),
         )
         .route("/api/v1/topics", get(list_topics))
-        .route("/api/v1/topics/{*path}", post(publish_topic))
+        .route("/api/v1/topics/{*path}", get(get_topic).post(publish_topic))
         .route("/api/v1/subscriptions", get(list_subscriptions))
+        .route(
+            "/api/v1/rules",
+            get(rules::list_rules).post(rules::create_rule),
+        )
+        .route(
+            "/api/v1/rules/{rule_id}",
+            put(rules::update_rule).delete(rules::delete_rule),
+        )
         .route("/api/v1/system/status", get(system_status))
+        .route("/api/v1/events", get(events::events))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             require_bearer,
@@ -83,13 +101,17 @@ pub fn router(broker: Broker, token: Option<String>) -> Router {
         .route("/health", get(health))
         .route("/api/v1/system/health", get(health))
         .with_state(state);
-    Router::new().merge(open).merge(protected)
+    Router::new()
+        .merge(open)
+        .merge(protected)
+        .layer(middleware::from_fn(cors))
 }
 
 #[derive(Clone)]
-struct AppState {
-    broker: Broker,
-    token: Option<String>,
+pub(crate) struct AppState {
+    pub(crate) broker: Broker,
+    pub(crate) token: Option<String>,
+    pub(crate) rules: Arc<Mutex<rules::RuleStore>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -97,6 +119,8 @@ struct ClientQuery {
     page: Option<u32>,
     page_size: Option<u32>,
     connected: Option<bool>,
+    client_id: Option<String>,
+    protocol: Option<u8>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -116,12 +140,8 @@ async fn require_bearer(
     let Some(expected) = state.token.as_deref() else {
         return next.run(request).await;
     };
-    let presented = request
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "));
-    match presented {
+    let presented = presented_token(&request);
+    match presented.as_deref() {
         Some(token) if constant_time_eq(token.as_bytes(), expected.as_bytes()) => {
             next.run(request).await
         }
@@ -181,7 +201,13 @@ async fn list_clients(
 ) -> Json<Value> {
     let page = usize::try_from(query.page.unwrap_or(1).max(1)).unwrap_or(1);
     let page_size = usize::try_from(query.page_size.unwrap_or(20).max(1)).unwrap_or(20);
-    let (total, clients) = state.broker.list_clients(query.connected, page, page_size);
+    let (total, clients) = state.broker.list_clients(
+        query.connected,
+        query.client_id.as_deref(),
+        query.protocol,
+        page,
+        page_size,
+    );
     let data: Vec<Value> = clients.iter().map(client_json).collect();
     Json(json!({
         "total": total,
@@ -208,6 +234,42 @@ async fn delete_client(State(state): State<AppState>, Path(client_id): Path<Stri
     }
     Json(json!({
         "data": { "client_id": client_id, "disconnected": true },
+        "error": null,
+    }))
+    .into_response()
+}
+
+async fn get_topic(State(state): State<AppState>, Path(path): Path<String>) -> Response {
+    if path.is_empty() || path.ends_with("/publish") {
+        return error_response(StatusCode::NOT_FOUND, "not_found", "resource not found");
+    }
+    let Some(topic) = state
+        .broker
+        .list_topics()
+        .into_iter()
+        .find(|topic| topic.topic == path)
+    else {
+        return error_response(StatusCode::NOT_FOUND, "not_found", "resource not found");
+    };
+    let retained = state.broker.retained(&topic.topic);
+    let (payload_text, payload_hex, qos) = match retained {
+        Some(message) => {
+            let text = std::str::from_utf8(&message.payload)
+                .ok()
+                .map(str::to_owned);
+            (text, Some(hex_encode(&message.payload)), Some(message.qos))
+        }
+        None => (None, None, None),
+    };
+    Json(json!({
+        "data": {
+            "topic": topic.topic,
+            "subscribers": topic.subscribers,
+            "retained": topic.retained,
+            "payload_text": payload_text,
+            "payload_hex": payload_hex,
+            "qos": qos,
+        },
         "error": null,
     }))
     .into_response()
@@ -302,6 +364,9 @@ fn client_json(client: &ClientSnapshot) -> Value {
         "connected": client.connected,
         "connected_at": client.connected_at_ms.and_then(rfc3339),
         "username": client.username,
+        "keep_alive": client.keep_alive,
+        "clean_start": client.clean_start,
+        "session_expiry": client.session_expiry,
     })
 }
 
@@ -318,7 +383,7 @@ fn rfc3339(millis: i64) -> Option<String> {
         .map(|time| time.to_rfc3339_opts(SecondsFormat::Secs, true))
 }
 
-fn error_response(status: StatusCode, code: &'static str, message: &str) -> Response {
+pub(crate) fn error_response(status: StatusCode, code: &'static str, message: &str) -> Response {
     (
         status,
         Json(json!({
@@ -327,6 +392,109 @@ fn error_response(status: StatusCode, code: &'static str, message: &str) -> Resp
         })),
     )
         .into_response()
+}
+
+fn presented_token(request: &axum::extract::Request) -> Option<String> {
+    if let Some(token) = request
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+    {
+        return Some(token.to_owned());
+    }
+    if request.uri().path() == "/api/v1/events" {
+        return request
+            .uri()
+            .query()
+            .and_then(|query| query_value(query, "token"));
+    }
+    None
+}
+
+fn query_value(query: &str, key: &str) -> Option<String> {
+    query.split('&').find_map(|pair| {
+        let (name, value) = pair.split_once('=').unwrap_or((pair, ""));
+        if name == key {
+            Some(percent_decode(value))
+        } else {
+            None
+        }
+    })
+}
+
+fn percent_decode(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%'
+            && let Some(high) = index.checked_add(1).and_then(|next| bytes.get(next))
+            && let Some(low) = index.checked_add(2).and_then(|next| bytes.get(next))
+            && let Some(high) = hex_value(*high)
+            && let Some(low) = hex_value(*low)
+        {
+            out.push((high << 4) | low);
+            index += 3;
+            continue;
+        }
+        out.push(if bytes[index] == b'+' {
+            b' '
+        } else {
+            bytes[index]
+        });
+        index += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len().saturating_mul(2));
+    for byte in bytes {
+        out.push(HEX[usize::from(byte >> 4)] as char);
+        out.push(HEX[usize::from(byte & 0x0f)] as char);
+    }
+    out
+}
+
+async fn cors(request: axum::extract::Request, next: Next) -> Response {
+    if request.method() == Method::OPTIONS {
+        let mut headers = HeaderMap::new();
+        apply_cors(&mut headers);
+        return (StatusCode::NO_CONTENT, headers).into_response();
+    }
+    let mut response = next.run(request).await;
+    apply_cors(response.headers_mut());
+    response
+}
+
+fn apply_cors(headers: &mut HeaderMap) {
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_ORIGIN,
+        HeaderValue::from_static("*"),
+    );
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_METHODS,
+        HeaderValue::from_static("GET, POST, PUT, DELETE, OPTIONS"),
+    );
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_HEADERS,
+        HeaderValue::from_static("authorization, content-type"),
+    );
+    headers.insert(
+        header::ACCESS_CONTROL_MAX_AGE,
+        HeaderValue::from_static("600"),
+    );
 }
 
 fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {

@@ -1,6 +1,6 @@
 # 项目概述
 
-> 状态: 单节点 Broker、认证授权和管理 API 已可运行。规则引擎、Web GUI 与集群仍在规划中。
+> 状态: 单节点 Broker、认证授权、管理 API 和 Web GUI 已可运行。规则引擎与集群仍在规划中。
 
 ## 项目简介
 
@@ -25,7 +25,7 @@ Heron 是一个使用 Rust 编写的 MQTT Broker 与管理平台，覆盖协议�
 | 持久化 | 内存存储，以及 SeaORM + PostgreSQL | 已实现 |
 | REST API | 客户端、主题、订阅、系统状态、健康检查、Prometheus | 已实现 |
 | 插件系统 | 用户名/密码、Token、证书认证与 ACL。钩子仍未实现 | 部分实现 |
-| Web GUI | Vue 3 + Reka UI 管理界面 | 规划中 |
+| Web GUI | React + shadcn/ui 管理界面 | 已实现 |
 | Raft 集群 | 节点协同与高可用 | 规划中 |
 
 ## 当前仓库结构
