@@ -109,6 +109,12 @@ pub struct ConnectRequest {
     pub enhanced_auth: bool,
     /// Peer address for diagnostics, when the listener knows it.
     pub peer: Option<String>,
+    /// MQTT username. Empty is treated as absent.
+    pub username: Option<String>,
+    /// MQTT password or token.
+    pub password: Option<Bytes>,
+    /// Identity from a verified client certificate.
+    pub certificate_identity: Option<String>,
 }
 
 /// A running connection attached to a session.

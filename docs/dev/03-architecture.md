@@ -1,6 +1,6 @@
 # 系统架构
 
-> 状态: 单节点 Broker 已实现。REST API、规则引擎、Web GUI 与 Raft 仍为设计。
+> 状态: 单节点 Broker、TLS、认证授权与 REST API 已实现。规则引擎、Web GUI 与 Raft 仍为设计。
 
 ## 整体架构
 
@@ -27,7 +27,7 @@
 │  ┌────────────────────────────────────────────────────────────┐  │
 │  │                    Protocol Layer                          │  │
 │  │  ┌─────────────────────┐  ┌─────────────────────────────┐  │  │
-│  │  │  heron_codec (v4)    │  │     heron_codec (v5)         │  │  │
+│  │  │  mqtt_codec (v4)    │  │     mqtt_codec (v5)         │  │  │
 │  │  │  - Encoder/Decoder  │  │  - Encoder/Decoder          │  │  │
 │  │  │  - Packet Types     │  │  - Properties Support       │  │  │
 │  │  └─────────────────────┘  └─────────────────────────────┘  │  │
@@ -52,7 +52,7 @@
 
 ## 模块划分
 
-### heron_codec (协议层) — 已完成
+### mqtt_codec (协议层) — 已完成
 
 - v4 模块: MQTT v3.1.1 协议支持
 - v5 模块: MQTT v5.0 协议支持
@@ -63,11 +63,11 @@
 - 会话、主题树、订阅与 QoS 0/1/2 路由
 - `Storage` 接口：默认内存实现，PostgreSQL 由 SeaORM 写入
 
-### heron_auth (认证授权) — 计划中
+### heron_auth (认证授权) — 已实现
 
-- Authenticator: 认证接口和实现
-- Authorizer: 授权接口和实现
-- Plugin System: 插件加载和管理
+- Authenticator: 用户名/密码、Token、客户端证书身份
+- Authorizer: 优先级 ACL
+- 钩子插件仍未实现
 
 ### heron_rules (规则引擎) — 计划中
 
@@ -76,11 +76,11 @@
 - Actions: 动作执行器
 - Hooks: 钩子系统
 
-### heron_api (REST API) — 计划中
+### heron_api (REST API) — 已实现
 
-- Routes: API 路由定义
-- Handlers: 请求处理器
-- Metrics: Prometheus 指标导出
+- Routes: `/api/v1` 客户端、主题、订阅、系统状态
+- Health: `/health` 与 `/api/v1/system/health`
+- Metrics: Prometheus 文本 `GET /metrics`
 
 ### heron_cluster (集群模块) — 计划中
 

@@ -10,20 +10,23 @@ Heron 是一个使用 Rust 编写的 MQTT 项目，目标是逐步演进为完�
 
 | Crate | 说明 |
 |-------|------|
-| `heron_codec` | MQTT v3.1.1 / v5.0 控制报文编解码与协议校验 |
-| `heron_client` | 异步 MQTT 客户端（TCP/TLS、自动重连、QoS 0/1/2、v3.1.1 与 v5.0） |
+| `mqtt_codec` | MQTT v3.1.1 / v5.0 控制报文编解码与协议校验 |
+| `mqtt_client` | 异步 MQTT 客户端（TCP/TLS、自动重连、QoS 0/1/2、v3.1.1 与 v5.0） |
 | `heron_core` | 会话、主题树、QoS 0/1/2 路由与存储接口 |
 | `heron_mqtt` | TCP 与 WebSocket 接入 |
+| `heron_auth` | 用户名/密码、Token、客户端证书与 ACL |
+| `heron_api` | REST 管理接口、健康检查、Prometheus |
 | `heron_storage` | SeaORM + PostgreSQL 持久化 |
 | `heron` | 单节点 Broker 进程 |
 
-- 已实现：单节点 Broker（TCP/WebSocket、会话、主题、QoS 0/1/2、保留消息、遗嘱、内存或 PostgreSQL 持久化）
-- 已实现：`heron_codec` 编解码，以及 `heron_client` 发布/订阅、TLS、自动重连
-- 规划中：认证与 ACL、REST API、Web GUI、Docker 与集群
+- 已实现：单节点 Broker（TCP/WebSocket/TLS、会话、主题、QoS 0/1/2、保留消息、遗嘱、内存或 PostgreSQL 持久化）
+- 已实现：用户名/密码、Token、客户端证书认证与 ACL；管理 REST API、健康检查和 Prometheus
+- 已实现：`mqtt_codec` 编解码，以及 `mqtt_client` 发布/订阅、TLS、自动重连
+- 规划中：规则引擎、Web GUI、Docker 与集群
 
 ```bash
 cargo run -p heron
-cargo run -p heron_client -- sub -H 127.0.0.1 -p 1883 -t test/#
+cargo run -p mqtt_client -- sub -H 127.0.0.1 -p 1883 -t test/#
 ```
 
 ## 快速开始
@@ -39,11 +42,11 @@ cargo test --workspace
 
 ```bash
 cargo run -p heron
-cargo run -p heron_client -- pub -t test/topic -m hello -q 1
-cargo run -p heron_client -- --protocol v5 sub -H 127.0.0.1 -t test/#
+cargo run -p mqtt_client -- pub -t test/topic -m hello -q 1
+cargo run -p mqtt_client -- --protocol v5 sub -H 127.0.0.1 -t test/#
 ```
 
-更详细的说明见 [docs/dev/README.md](docs/dev/README.md) 与 [crates/heron_codec/README.md](crates/heron_codec/README.md)。
+更详细的说明见 [docs/dev/README.md](docs/dev/README.md) 与 [crates/mqtt_codec/README.md](crates/mqtt_codec/README.md)。
 
 ## 文档入口
 
@@ -57,8 +60,8 @@ cargo run -p heron_client -- --protocol v5 sub -H 127.0.0.1 -t test/#
 ```text
 Heron/
 ├── crates/
-│   ├── heron_codec/          # MQTT 编解码库
-│   ├── heron_client/         # MQTT 客户端库（库 + CLI + 集成测试）
+│   ├── mqtt_codec/          # MQTT 编解码库
+│   ├── mqtt_client/         # MQTT 客户端库（库 + CLI + 集成测试）
 │   ├── heron_core/    # 会话、主题树与路由
 │   ├── heron_mqtt/    # TCP / WebSocket
 │   ├── heron_storage/ # SeaORM + PostgreSQL

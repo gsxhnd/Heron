@@ -2,10 +2,11 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, MutexGuard, RwLock};
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
+use heron_auth::{Action, AuthError, AuthRequest, Authenticator, Authorizer, Identity};
 use tokio::sync::Notify;
 
 use crate::error::{
@@ -53,6 +54,81 @@ struct Inner {
     state: Mutex<State>,
     storage: Arc<dyn Storage>,
     config: BrokerConfig,
+    security: RwLock<Security>,
+    started: Instant,
+    messages_received: AtomicU64,
+    messages_sent: AtomicU64,
+}
+
+#[derive(Clone)]
+struct Security {
+    authenticator: Arc<dyn Authenticator>,
+    authorizer: Arc<dyn Authorizer>,
+}
+
+impl Security {
+    fn allow_all() -> Self {
+        Self {
+            authenticator: Arc::new(heron_auth::AllowAll),
+            authorizer: Arc::new(heron_auth::AllowAll),
+        }
+    }
+}
+
+/// One connected or persistent session, as exposed to the management API.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientSnapshot {
+    /// Client identifier.
+    pub client_id: String,
+    /// Protocol level, 4 or 5.
+    pub protocol_version: u8,
+    /// Peer address captured at CONNECT, when the listener provided one.
+    pub peer: Option<String>,
+    /// True while a connection owns the session.
+    pub connected: bool,
+    /// Unix milliseconds when the current connection attached.
+    pub connected_at_ms: Option<i64>,
+    /// Authenticated username. `None` is anonymous.
+    pub username: Option<String>,
+    /// Keep-alive seconds from CONNECT.
+    pub keep_alive: u16,
+}
+
+/// A topic filter or retained topic.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TopicSnapshot {
+    /// Filter or retained topic name.
+    pub topic: String,
+    /// Clients whose subscription filter is exactly `topic`.
+    pub subscribers: usize,
+    /// True when a retained message is stored at `topic`.
+    pub retained: bool,
+}
+
+/// One installed subscription.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubscriptionSnapshot {
+    /// Subscriber.
+    pub client_id: String,
+    /// Topic filter.
+    pub topic: String,
+    /// Granted QoS.
+    pub qos: u8,
+}
+
+/// Counters for `/system/status` and Prometheus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BrokerStatus {
+    /// Seconds since [`Broker::open`].
+    pub uptime_secs: u64,
+    /// Sessions with a live connection.
+    pub connections: u64,
+    /// Sessions resident in memory, including offline persistent sessions.
+    pub sessions: u64,
+    /// PUBLISH packets accepted from clients and the management API.
+    pub messages_received: u64,
+    /// PUBLISH packets queued toward subscribers.
+    pub messages_sent: u64,
 }
 
 struct State {
@@ -84,6 +160,10 @@ struct Session {
     superseded: Option<(u64, u8)>,
     peer: Option<String>,
     disconnected_at_ms: Option<i64>,
+    username: Option<String>,
+    connected_at_ms: Option<i64>,
+    /// Set by an administrative disconnect. Poll delivers it once.
+    kick: Option<u8>,
 }
 
 struct OutRecord {
@@ -223,9 +303,17 @@ impl Broker {
             forget_session(&mut state, &client_id, &mut ops);
         }
 
+        let messages_sent = AtomicU64::new(0);
         for (client_id, will) in immediate_wills {
             let publish = incoming_from_will(&will);
-            route(&mut state, &config, &client_id, &publish, &mut ops);
+            route(
+                &mut state,
+                &config,
+                &client_id,
+                &publish,
+                &mut ops,
+                &messages_sent,
+            );
         }
 
         // Sessions removed above must leave the map. `forget_session` does that.
@@ -248,6 +336,10 @@ impl Broker {
                 state: Mutex::new(state),
                 storage,
                 config,
+                security: RwLock::new(Security::allow_all()),
+                started: Instant::now(),
+                messages_received: AtomicU64::new(0),
+                messages_sent,
             }),
         };
         broker.persist(ops).await?;
@@ -262,6 +354,217 @@ impl Broker {
         self.inner.config.clone()
     }
 
+    /// Replace the authenticator and authorizer. The default accepts every client.
+    pub fn install_security(
+        &self,
+        authenticator: Arc<dyn Authenticator>,
+        authorizer: Arc<dyn Authorizer>,
+    ) {
+        let mut guard = match self.inner.security.write() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        *guard = Security {
+            authenticator,
+            authorizer,
+        };
+    }
+
+    /// Connected and persistent sessions, sorted by client id.
+    ///
+    /// `page` is 1-based. `page_size` is clamped to 1..=200.
+    pub fn list_clients(
+        &self,
+        connected: Option<bool>,
+        page: usize,
+        page_size: usize,
+    ) -> (usize, Vec<ClientSnapshot>) {
+        let page_size = page_size.clamp(1, 200);
+        let page = page.max(1);
+        let state = self.lock();
+        let mut clients: Vec<ClientSnapshot> = state
+            .sessions
+            .values()
+            .filter(|session| connected.is_none_or(|flag| session.connected == flag))
+            .map(client_snapshot)
+            .collect();
+        clients.sort_by(|left, right| left.client_id.cmp(&right.client_id));
+        let total = clients.len();
+        let start = page.saturating_sub(1).saturating_mul(page_size);
+        let page_items = clients.into_iter().skip(start).take(page_size).collect();
+        (total, page_items)
+    }
+
+    /// One session, when it is resident.
+    pub fn client(&self, client_id: &str) -> Option<ClientSnapshot> {
+        self.lock().sessions.get(client_id).map(client_snapshot)
+    }
+
+    /// Ask the connection task to close. Returns false when the client is offline.
+    pub fn disconnect_client(&self, client_id: &str) -> bool {
+        let mut state = self.lock();
+        let Some(session) = state.sessions.get_mut(client_id) else {
+            return false;
+        };
+        if !session.connected {
+            return false;
+        }
+        session.kick = Some(0x98);
+        session.notify.notify_one();
+        true
+    }
+
+    /// Subscription filters and retained topics.
+    pub fn list_topics(&self) -> Vec<TopicSnapshot> {
+        let state = self.lock();
+        let mut topics: HashMap<String, TopicSnapshot> = HashMap::new();
+        for (topic, subscribers) in state.topics.subscription_filters() {
+            topics.insert(
+                topic.clone(),
+                TopicSnapshot {
+                    topic,
+                    subscribers,
+                    retained: false,
+                },
+            );
+        }
+        for topic in state.topics.retained_topics() {
+            topics
+                .entry(topic.clone())
+                .and_modify(|snapshot| snapshot.retained = true)
+                .or_insert_with(|| TopicSnapshot {
+                    topic,
+                    subscribers: 0,
+                    retained: true,
+                });
+        }
+        let mut listed: Vec<TopicSnapshot> = topics.into_values().collect();
+        listed.sort_by(|left, right| left.topic.cmp(&right.topic));
+        listed
+    }
+
+    /// Every installed subscription.
+    pub fn list_subscriptions(&self) -> Vec<SubscriptionSnapshot> {
+        let state = self.lock();
+        let mut listed = Vec::new();
+        for session in state.sessions.values() {
+            for (topic, opts) in &session.subscriptions {
+                listed.push(SubscriptionSnapshot {
+                    client_id: session.client_id.clone(),
+                    topic: topic.clone(),
+                    qos: opts.qos.as_u8(),
+                });
+            }
+        }
+        listed.sort_by(|left, right| {
+            left.client_id
+                .cmp(&right.client_id)
+                .then(left.topic.cmp(&right.topic))
+        });
+        listed
+    }
+
+    /// Inject a publication from the management API. It is not ACL-checked.
+    pub async fn publish_admin(&self, publish: IncomingPublish) -> Result<(), PublishError> {
+        if !valid_topic_name(&publish.topic) {
+            return Err(PublishError::InvalidTopic);
+        }
+        self.inner.messages_received.fetch_add(1, Ordering::Relaxed);
+        let mut ops = Vec::new();
+        {
+            let mut state = self.lock();
+            route(
+                &mut state,
+                &self.inner.config,
+                "$heron",
+                &publish,
+                &mut ops,
+                &self.inner.messages_sent,
+            );
+        }
+        if let Err(err) = self.persist(ops).await {
+            tracing::warn!(error = %err, "持久化管理端发布失败");
+        }
+        Ok(())
+    }
+
+    /// Uptime and message counters.
+    pub fn status(&self) -> BrokerStatus {
+        let state = self.lock();
+        let connections = state
+            .sessions
+            .values()
+            .filter(|session| session.connected)
+            .count();
+        BrokerStatus {
+            uptime_secs: self.inner.started.elapsed().as_secs(),
+            connections: u64::try_from(connections).unwrap_or(u64::MAX),
+            sessions: u64::try_from(state.sessions.len()).unwrap_or(u64::MAX),
+            messages_received: self.inner.messages_received.load(Ordering::Relaxed),
+            messages_sent: self.inner.messages_sent.load(Ordering::Relaxed),
+        }
+    }
+
+    fn security(&self) -> Security {
+        match self.inner.security.read() {
+            Ok(guard) => guard.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        }
+    }
+
+    async fn authenticate(&self, request: &ConnectRequest) -> Result<Identity, ConnectError> {
+        let authenticator = self.security().authenticator;
+        authenticator
+            .authenticate(AuthRequest {
+                client_id: &request.client_id,
+                username: request.username.as_deref(),
+                password: request.password.as_deref(),
+                certificate_identity: request.certificate_identity.as_deref(),
+            })
+            .await
+            .map_err(connect_auth_error)
+    }
+
+    async fn allow(
+        &self,
+        client_id: &str,
+        username: Option<&str>,
+        topic: &str,
+        action: Action,
+    ) -> Result<(), ConnectError> {
+        let authorizer = self.security().authorizer;
+        match authorizer
+            .authorize(client_id, username, topic, action)
+            .await
+            .map_err(connect_auth_error)?
+        {
+            true => Ok(()),
+            false => Err(ConnectError::NotAuthorized),
+        }
+    }
+
+    async fn publish_allowed(
+        &self,
+        client_id: &str,
+        username: Option<&str>,
+        topic: &str,
+    ) -> Result<(), PublishError> {
+        let authorizer = self.security().authorizer;
+        match authorizer
+            .authorize(client_id, username, topic, Action::Publish)
+            .await
+        {
+            Ok(true) => Ok(()),
+            Ok(false) | Err(AuthError::NotAuthorized) | Err(AuthError::BadCredentials) => {
+                Err(PublishError::NotAuthorized)
+            }
+            Err(AuthError::Internal(message)) => {
+                tracing::warn!(error = %message, "发布授权失败");
+                Err(PublishError::NotAuthorized)
+            }
+        }
+    }
+
     /// Accept CONNECT and attach a connection to the session.
     pub async fn connect(&self, request: ConnectRequest) -> Result<ConnectedSession, ConnectError> {
         if request.enhanced_auth {
@@ -272,6 +575,17 @@ impl Broker {
             Err(err) => return Err(err),
         };
         let server_assigned_id = request.client_id.is_empty();
+        let identity = self.authenticate(&request).await?;
+        if let Some(will) = &request.will {
+            self.allow(
+                &client_id,
+                identity.username.as_deref(),
+                &will.topic,
+                Action::Publish,
+            )
+            .await?;
+        }
+        let username = identity.username;
 
         let (connected, ops) = {
             let mut state = self.lock();
@@ -300,12 +614,13 @@ impl Broker {
             let session_present = exists && !request.clean_start;
 
             let session = if let Some(session) = state.sessions.get_mut(&client_id) {
-                prepare_attached(session, &request, &client_id);
+                prepare_attached(session, &request, &client_id, username.as_deref());
                 session
             } else {
-                state
-                    .sessions
-                    .insert(client_id.clone(), new_session(&client_id, &request));
+                state.sessions.insert(
+                    client_id.clone(),
+                    new_session(&client_id, &request, username.as_deref()),
+                );
                 state
                     .sessions
                     .get_mut(&client_id)
@@ -330,6 +645,7 @@ impl Broker {
                     &client_id,
                     &publish,
                     &mut ops,
+                    &self.inner.messages_sent,
                 );
             }
             (connected, ops)
@@ -345,6 +661,34 @@ impl Broker {
         epoch: u64,
         filters: &[SubscribeFilter],
     ) -> Result<Vec<SubscribeAck>, CoreError> {
+        let username = {
+            let state = self.lock();
+            match state.sessions.get(client_id) {
+                Some(session) if session.epoch == epoch && session.connected => {
+                    Ok(session.username.clone())
+                }
+                _ => Err(CoreError::SessionNotFound),
+            }
+        }?;
+        let authorizer = self.security().authorizer;
+        let mut allowed = Vec::with_capacity(filters.len());
+        for filter in filters {
+            match authorizer
+                .authorize(
+                    client_id,
+                    username.as_deref(),
+                    &filter.filter,
+                    Action::Subscribe,
+                )
+                .await
+            {
+                Ok(flag) => allowed.push(flag),
+                Err(AuthError::Internal(message)) => {
+                    return Err(CoreError::Authorization(message));
+                }
+                Err(AuthError::NotAuthorized | AuthError::BadCredentials) => allowed.push(false),
+            }
+        }
         let (acks, ops) = {
             let mut state = self.lock();
             let mut ops = Vec::new();
@@ -352,13 +696,18 @@ impl Broker {
             if !owns_session(state.sessions.get(client_id), epoch) {
                 return Err(CoreError::SessionNotFound);
             }
-            for filter in filters {
+            for (filter, allow) in filters.iter().zip(allowed) {
+                if !allow {
+                    acks.push(SubscribeAck::Failed(SubscribeFailure::NotAuthorized));
+                    continue;
+                }
                 acks.push(subscribe_one(
                     &mut state,
                     &self.inner.config,
                     client_id,
                     filter,
                     &mut ops,
+                    &self.inner.messages_sent,
                 ));
             }
             (acks, ops)
@@ -414,6 +763,25 @@ impl Broker {
         if publish.qos > QoS::AtMostOnce && publish.packet_id.unwrap_or(0) == 0 {
             return Err(PublishError::MissingPacketId);
         }
+        let gate = {
+            let state = self.lock();
+            match state.sessions.get(client_id) {
+                Some(session) if session.epoch == epoch => Ok((
+                    publish.qos == QoS::ExactlyOnce
+                        && session
+                            .inbound
+                            .contains_key(&publish.packet_id.unwrap_or(0)),
+                    session.username.clone(),
+                )),
+                _ => Err(PublishError::StaleSession),
+            }
+        }?;
+        if gate.0 {
+            return Ok(ClientFlow::PubRec);
+        }
+        let username = gate.1;
+        self.publish_allowed(client_id, username.as_deref(), &publish.topic)
+            .await?;
         let ops = {
             let receive_limit = usize::from(self.inner.config.receive_maximum.max(1));
             let mut state = self.lock();
@@ -464,6 +832,7 @@ impl Broker {
                     client_id,
                     &publish,
                     &mut ops,
+                    &self.inner.messages_sent,
                 );
                 ops
             }
@@ -471,6 +840,7 @@ impl Broker {
         if let Err(err) = self.persist(ops).await {
             tracing::warn!(error = %err, "持久化入站发布失败");
         }
+        self.inner.messages_received.fetch_add(1, Ordering::Relaxed);
         Ok(match publish.qos {
             QoS::AtMostOnce => ClientFlow::Accepted,
             QoS::AtLeastOnce => ClientFlow::PubAck,
@@ -485,15 +855,48 @@ impl Broker {
         epoch: u64,
         packet_id: u16,
     ) -> Result<ClientFlow, PublishError> {
+        let pending = {
+            let state = self.lock();
+            match state.sessions.get(client_id) {
+                Some(session) if session.epoch == epoch => {
+                    let topic = session
+                        .inbound
+                        .get(&packet_id)
+                        .map(|message| message.topic.clone());
+                    let username = session.username.clone();
+                    Ok(topic.map(|topic| (topic, username)))
+                }
+                _ => Err(PublishError::StaleSession),
+            }
+        }?;
+        if let Some((topic, username)) = pending
+            && let Err(err) = self
+                .publish_allowed(client_id, username.as_deref(), &topic)
+                .await
+        {
+            {
+                let mut state = self.lock();
+                if let Some(session) = state.sessions.get_mut(client_id)
+                    && session.epoch == epoch
+                {
+                    session.inbound.remove(&packet_id);
+                }
+            }
+            let _ = self
+                .persist(vec![WriteOp::DeleteMessage {
+                    client_id: client_id.to_owned(),
+                    packet_id,
+                    direction: Direction::In,
+                }])
+                .await;
+            return Err(err);
+        }
         let ops = {
             let mut state = self.lock();
-            let Some(session) = state.sessions.get_mut(client_id) else {
-                return Err(PublishError::StaleSession);
+            let message = match state.sessions.get_mut(client_id) {
+                Some(session) if session.epoch == epoch => session.inbound.remove(&packet_id),
+                _ => return Err(PublishError::StaleSession),
             };
-            if session.epoch != epoch {
-                return Err(PublishError::StaleSession);
-            }
-            let message = session.inbound.remove(&packet_id);
             let mut ops = vec![WriteOp::DeleteMessage {
                 client_id: client_id.to_owned(),
                 packet_id,
@@ -513,6 +916,7 @@ impl Broker {
                     client_id,
                     &publish,
                     &mut ops,
+                    &self.inner.messages_sent,
                 );
             }
             ops
@@ -599,6 +1003,9 @@ impl Broker {
                     .superseded
                     .and_then(|(old, code)| (old == epoch).then_some(code));
                 return vec![PollEvent::Disconnect { reason }];
+            }
+            if let Some(code) = session.kick.take() {
+                return vec![PollEvent::Disconnect { reason: Some(code) }];
             }
             let mut events = Vec::new();
             let mut ops = Vec::new();
@@ -794,6 +1201,7 @@ impl Broker {
                 client_id,
                 &publish,
                 &mut ops,
+                &self.inner.messages_sent,
             );
             ops
         };
@@ -819,6 +1227,7 @@ impl Broker {
                     client_id,
                     &publish,
                     &mut ops,
+                    &self.inner.messages_sent,
                 );
             }
             forget_session(&mut state, client_id, &mut ops);
@@ -919,6 +1328,26 @@ fn generate_client_id() -> String {
     format!("flow-{:x}-{n:x}", now_ms())
 }
 
+fn connect_auth_error(err: AuthError) -> ConnectError {
+    match err {
+        AuthError::BadCredentials => ConnectError::BadCredentials,
+        AuthError::NotAuthorized => ConnectError::NotAuthorized,
+        AuthError::Internal(message) => ConnectError::ServerUnavailable(message),
+    }
+}
+
+fn client_snapshot(session: &Session) -> ClientSnapshot {
+    ClientSnapshot {
+        client_id: session.client_id.clone(),
+        protocol_version: session.protocol.level(),
+        peer: session.peer.clone(),
+        connected: session.connected,
+        connected_at_ms: session.connected_at_ms,
+        username: session.username.clone(),
+        keep_alive: session.keep_alive,
+    }
+}
+
 fn now_ms() -> i64 {
     let millis = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -927,7 +1356,7 @@ fn now_ms() -> i64 {
     i64::try_from(millis).unwrap_or(i64::MAX)
 }
 
-fn new_session(client_id: &str, request: &ConnectRequest) -> Session {
+fn new_session(client_id: &str, request: &ConnectRequest, username: Option<&str>) -> Session {
     Session {
         client_id: client_id.to_owned(),
         epoch: 1,
@@ -951,10 +1380,18 @@ fn new_session(client_id: &str, request: &ConnectRequest) -> Session {
         superseded: None,
         peer: request.peer.clone(),
         disconnected_at_ms: None,
+        username: username.map(str::to_owned),
+        connected_at_ms: Some(now_ms()),
+        kick: None,
     }
 }
 
-fn prepare_attached(session: &mut Session, request: &ConnectRequest, client_id: &str) {
+fn prepare_attached(
+    session: &mut Session,
+    request: &ConnectRequest,
+    client_id: &str,
+    username: Option<&str>,
+) {
     session.client_id = client_id.to_owned();
     session.epoch = session.epoch.saturating_add(1);
     session.connected = true;
@@ -969,6 +1406,9 @@ fn prepare_attached(session: &mut Session, request: &ConnectRequest, client_id: 
     session.peer = request.peer.clone();
     session.disconnected_at_ms = None;
     session.inflight_sent = 0;
+    session.username = username.map(str::to_owned);
+    session.connected_at_ms = Some(now_ms());
+    session.kick = None;
 }
 
 fn normalize_receive_maximum(value: u16) -> u16 {
@@ -1014,6 +1454,7 @@ fn subscribe_one(
     client_id: &str,
     filter: &SubscribeFilter,
     ops: &mut Vec<WriteOp>,
+    sent: &AtomicU64,
 ) -> SubscribeAck {
     if filter.opts.retain_handling > 2 {
         return SubscribeAck::Failed(SubscribeFailure::Unspecified);
@@ -1059,7 +1500,7 @@ fn subscribe_one(
                         retain: true,
                         packet_id: None,
                     };
-                    enqueue(state, config, client_id, &deliver, true, ops);
+                    enqueue(state, config, client_id, &deliver, true, ops, sent);
                 }
             }
             SubscribeAck::Granted(filter.opts.qos)
@@ -1073,6 +1514,7 @@ fn route(
     publisher: &str,
     publish: &IncomingPublish,
     ops: &mut Vec<WriteOp>,
+    sent: &AtomicU64,
 ) {
     if publish.retain {
         if publish.payload.is_empty() {
@@ -1105,7 +1547,15 @@ fn route(
             retain,
             packet_id: None,
         };
-        enqueue(state, config, &subscriber.client_id, &deliver, false, ops);
+        enqueue(
+            state,
+            config,
+            &subscriber.client_id,
+            &deliver,
+            false,
+            ops,
+            sent,
+        );
     }
 }
 
@@ -1116,6 +1566,7 @@ fn enqueue(
     publish: &IncomingPublish,
     force_retain: bool,
     ops: &mut Vec<WriteOp>,
+    sent: &AtomicU64,
 ) {
     let Some(session) = state.sessions.get_mut(client_id) else {
         return;
@@ -1145,6 +1596,7 @@ fn enqueue(
         trim_queue(session, config.max_queued_messages);
         session.ready.push_back(ReadyItem::QoS0(message));
         session.notify.notify_one();
+        sent.fetch_add(1, Ordering::Relaxed);
         return;
     }
     trim_queue(session, config.max_queued_messages);
@@ -1174,6 +1626,7 @@ fn enqueue(
         direction: Direction::Out,
         state: MessageState::Pending,
     }));
+    sent.fetch_add(1, Ordering::Relaxed);
 }
 
 fn trim_queue(session: &mut Session, max_queued: usize) {
@@ -1313,6 +1766,9 @@ fn session_from_stored(client: &StoredClient) -> Option<Session> {
         superseded: None,
         peer: client.peer.clone(),
         disconnected_at_ms: client.disconnected_at_ms,
+        username: None,
+        connected_at_ms: None,
+        kick: None,
     };
     if !client.connected {
         session.pending_will = session.will.take();
@@ -1349,6 +1805,9 @@ fn ensure_shell(state: &mut State, client_id: &str) {
             superseded: None,
             peer: None,
             disconnected_at_ms: Some(now_ms()),
+            username: None,
+            connected_at_ms: None,
+            kick: None,
         },
     );
 }
@@ -1438,6 +1897,9 @@ mod tests {
             max_packet_size: 0,
             enhanced_auth: false,
             peer: None,
+            username: None,
+            password: None,
+            certificate_identity: None,
         }
     }
 
@@ -1859,6 +2321,111 @@ mod tests {
                 .poll(&client.client_id, client.epoch, 4)
                 .await
                 .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn password_and_acl_should_gate_connect_publish_and_subscribe() {
+        use std::collections::HashMap;
+
+        use heron_auth::{AclAction, AclAuthorizer, AclRule, BuiltInAuthenticator};
+
+        let hash = heron_auth::hash_password("secret").expect("hash");
+        let mut users = HashMap::new();
+        users.insert("alice".to_owned(), hash);
+        let authenticator = BuiltInAuthenticator::new(
+            false,
+            users,
+            vec![("device-token".to_owned(), "device-1".to_owned())],
+            None,
+        )
+        .expect("authenticator");
+        let authorizer = AclAuthorizer::new(
+            vec![AclRule {
+                username: Some("alice".to_owned()),
+                client_id: None,
+                topic: "sensors/#".to_owned(),
+                action: AclAction::PubSub,
+                allow: true,
+                priority: 0,
+            }],
+            false,
+        );
+        let broker = broker().await;
+        broker.install_security(Arc::new(authenticator), Arc::new(authorizer));
+
+        let anonymous = broker
+            .connect(connect_req("anon", true))
+            .await
+            .expect_err("anonymous");
+        assert_eq!(anonymous, ConnectError::NotAuthorized);
+
+        let mut credentials = connect_req("alice-client", true);
+        credentials.username = Some("alice".to_owned());
+        credentials.password = Some(Bytes::from_static(b"secret"));
+        let session = broker.connect(credentials).await.expect("alice");
+
+        let acks = broker
+            .subscribe(
+                &session.client_id,
+                session.epoch,
+                &[SubscribeFilter {
+                    filter: "#".to_owned(),
+                    opts: SubOpts::v4(QoS::AtMostOnce),
+                }],
+            )
+            .await
+            .expect("subscribe");
+        assert_eq!(
+            acks,
+            vec![SubscribeAck::Failed(SubscribeFailure::NotAuthorized)]
+        );
+
+        let denied = broker
+            .publish(
+                &session.client_id,
+                session.epoch,
+                IncomingPublish {
+                    topic: "other".to_owned(),
+                    payload: Bytes::from_static(b"x"),
+                    qos: QoS::AtMostOnce,
+                    retain: false,
+                    packet_id: None,
+                },
+            )
+            .await
+            .expect_err("acl");
+        assert_eq!(denied, PublishError::NotAuthorized);
+
+        broker
+            .publish(
+                &session.client_id,
+                session.epoch,
+                IncomingPublish {
+                    topic: "sensors/temp".to_owned(),
+                    payload: Bytes::from_static(b"21"),
+                    qos: QoS::AtMostOnce,
+                    retain: false,
+                    packet_id: None,
+                },
+            )
+            .await
+            .expect("publish");
+        assert!(broker.disconnect_client(&session.client_id));
+        let events = broker.poll(&session.client_id, session.epoch, 4).await;
+        assert!(matches!(
+            events.first(),
+            Some(PollEvent::Disconnect { reason: Some(0x98) })
+        ));
+
+        let mut token = connect_req("device", true);
+        token.password = Some(Bytes::from_static(b"device-token"));
+        let device = broker.connect(token).await.expect("token");
+        assert_eq!(
+            broker
+                .client(&device.client_id)
+                .and_then(|client| client.username),
+            Some("device-1".to_owned())
         );
     }
 }

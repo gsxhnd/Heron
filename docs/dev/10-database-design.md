@@ -1,6 +1,6 @@
 # 数据库设计
 
-> 状态: `heron_storage` 已用 SeaORM 创建并读写下列核心表。`ip_address` 存为 `VARCHAR`，订阅表增加 MQTT v5 选项，`messages` 增加 `direction`，`clients` 增加 `will_delay`。认证、规则和统计表仍未建。
+> 状态: `heron_storage` 已用 SeaORM 创建并读写下列核心表。认证用户和 ACL 在 v0.3.0 由 YAML 配置，`users` 与 `acl_rules` 表仍未建。规则和统计表仍未建。
 
 ## 核心表
 

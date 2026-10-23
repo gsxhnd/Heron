@@ -15,7 +15,9 @@ mod qos;
 mod storage;
 mod topic;
 
-pub use broker::{Broker, BrokerConfig};
+pub use broker::{
+    Broker, BrokerConfig, BrokerStatus, ClientSnapshot, SubscriptionSnapshot, TopicSnapshot,
+};
 pub use error::{
     ClientFlow, ConnectError, CoreError, PublishError, SubscribeAck, SubscribeFailure,
 };

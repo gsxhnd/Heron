@@ -7,5 +7,8 @@
 
 mod connection;
 mod server;
+mod tls;
 
 pub use server::Server;
+pub use tls::{ClientCertMode, acceptor_from_pem, certificate_identity};
+pub use tokio_rustls::TlsAcceptor;

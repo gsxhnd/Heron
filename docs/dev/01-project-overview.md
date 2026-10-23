@@ -1,6 +1,6 @@
 # 项目概述
 
-> 状态: 单节点 Broker 已可运行。认证、API、规则引擎、Web GUI 与集群仍在规划中。
+> 状态: 单节点 Broker、认证授权和管理 API 已可运行。规则引擎、Web GUI 与集群仍在规划中。
 
 ## 项目简介
 
@@ -23,8 +23,8 @@ Heron 是一个使用 Rust 编写的 MQTT Broker 与管理平台，覆盖协议�
 | Broker 核心 | TCP 接入、会话、主题、QoS 0/1/2 路由 | 已实现 |
 | WebSocket | MQTT over WebSocket（子协议 `mqtt`） | 已实现 |
 | 持久化 | 内存存储，以及 SeaORM + PostgreSQL | 已实现 |
-| REST API | 管理与监控接口 | 规划中 |
-| 插件系统 | 认证、授权、钩子扩展 | 规划中 |
+| REST API | 客户端、主题、订阅、系统状态、健康检查、Prometheus | 已实现 |
+| 插件系统 | 用户名/密码、Token、证书认证与 ACL。钩子仍未实现 | 部分实现 |
 | Web GUI | Vue 3 + Reka UI 管理界面 | 规划中 |
 | Raft 集群 | 节点协同与高可用 | 规划中 |
 
@@ -33,10 +33,12 @@ Heron 是一个使用 Rust 编写的 MQTT Broker 与管理平台，覆盖协议�
 ```text
 Heron/
 ├── crates/
-│   ├── heron_codec/            # 已实现
-│   ├── heron_client/           # 已实现
+│   ├── mqtt_codec/            # 已实现
+│   ├── mqtt_client/           # 已实现
 │   ├── heron_core/      # 会话、主题树、路由
-│   ├── heron_mqtt/      # TCP / WebSocket
+│   ├── heron_auth/      # 认证与 ACL
+│   ├── heron_mqtt/      # TCP / WebSocket / TLS
+│   ├── heron_api/       # REST、健康检查、Prometheus
 │   ├── heron_storage/   # SeaORM + PostgreSQL
 │   └── heron/           # 可执行入口
 ├── conf/broker.yaml           # 示例配置
@@ -49,8 +51,8 @@ Heron/
 ```text
 Heron/
 ├── crates/
-│   ├── heron_codec/
-│   ├── heron_client/
+│   ├── mqtt_codec/
+│   ├── mqtt_client/
 │   ├── heron_core/
 │   ├── heron_auth/
 │   ├── heron_rules/
@@ -62,12 +64,12 @@ Heron/
 
 ## 当前可以做什么
 
-- 运行 `cargo test -p heron_codec` 验证编解码实现
-- 阅读 `heron_codec/README.md` 了解 Builder、Codec 和校验接口
-- 参考 [编解码实现](06-codec-implementation.md) 理解代码结构
+- 运行 `cargo test -p mqtt_codec` 验证编解码实现
+- 启动单节点 Broker：`cargo run -p heron -- --config conf/broker.yaml`
+- 在配置中启用认证、TLS 和管理 API 后调用 `/health`、`/api/v1` 与 `/metrics`
+- 阅读 `mqtt_codec/README.md` 了解 Builder、Codec 和校验接口
 
 ## 当前还不能做什么
 
-- 启动 `./target/release/heron` Broker
-- 调用 REST API、健康检查或监控端点
 - 使用 Docker、集群或 Web 管理界面
+- 使用规则引擎或钩子插件

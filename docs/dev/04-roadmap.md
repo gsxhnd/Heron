@@ -1,6 +1,6 @@
 # 路线图
 
-> 状态: v0.2.0 单节点功能已落地。10,000+ 连接、P99 < 50ms、覆盖率 > 80% 仍是质量目标，尚未压测。
+> 状态: v0.4.0 管理 API 已落地。10,000+ 连接、P99 < 50ms、覆盖率 > 80% 仍是质量目标，尚未压测。
 
 ## 版本规划
 
@@ -18,19 +18,23 @@
 
 ---
 
-### v0.3.0 - 安全与认证
+### v0.3.0 - 安全与认证 ✅
 
-**预计**: 2-3 周
-
-核心: TLS 1.2/1.3、证书认证、用户名/密码/Token 认证、ACL 授权控制
+已落地: TLS 1.2/1.3（MQTTS 与 WSS）、用户名/密码、CONNECT 密码形式的 Token、已校验客户端证书身份，以及按优先级匹配的 ACL。默认不启用认证，行为与 v0.2.0 相同。用户、Token 和 ACL 来自 YAML，而不是数据库表。
 
 ---
 
-### v0.4.0 - API 接口
+### v0.4.0 - API 接口 ✅
 
-**预计**: 2 周
+已落地: Axum REST API。`GET /health` 与 `GET /api/v1/system/health` 不鉴权。其余 `/api/v1` 路由和 `GET /metrics` 在配置了 bearer token 时要求 `Authorization: Bearer`。
 
-核心: REST API (Axum) — 客户端/主题/系统管理，Prometheus 指标，健康检查
+- 客户端: 列表、详情、断开连接
+- 主题: 列表，以及 `POST /api/v1/topics/{topic}/publish`
+- 订阅: `GET /api/v1/subscriptions`
+- 系统: `GET /api/v1/system/status`
+- Prometheus: `GET /metrics`
+
+规则管理仍属于 v0.5.0。
 
 ---
 

@@ -1,6 +1,6 @@
 # 插件开发指南
 
-> 状态: 设计草案。当前仓库尚未提供插件系统实现。
+> 状态: 设计草案。`heron_auth` 已实现认证与 ACL trait，以及内置的密码、Token、证书和 ACL。钩子与动态插件加载仍未实现。
 
 ## 插件分类
 
@@ -31,6 +31,7 @@ pub trait Authorizer: Send + Sync {
     async fn authorize(
         &self,
         client_id: &str,
+        username: Option<&str>,
         topic: &str,
         action: Action,
     ) -> Result<bool, AuthError>;

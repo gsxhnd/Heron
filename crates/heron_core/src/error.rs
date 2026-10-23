@@ -12,6 +12,10 @@ pub enum CoreError {
     /// The client has no session, or the caller holds a stale epoch.
     #[error("session not found")]
     SessionNotFound,
+
+    /// The authorizer failed while checking a publish or subscribe.
+    #[error("authorization failed: {0}")]
+    Authorization(String),
 }
 
 /// CONNECT was refused before a session was attached.
@@ -25,6 +29,14 @@ pub enum ConnectError {
     #[error("bad authentication method")]
     BadAuthenticationMethod,
 
+    /// Username, password, or token was rejected.
+    #[error("bad username or password")]
+    BadCredentials,
+
+    /// The client is not allowed to connect.
+    #[error("not authorized")]
+    NotAuthorized,
+
     /// The broker could not finish session setup.
     #[error("server unavailable: {0}")]
     ServerUnavailable(String),
@@ -33,7 +45,9 @@ pub enum ConnectError {
 impl From<CoreError> for ConnectError {
     fn from(value: CoreError) -> Self {
         match value {
-            CoreError::Storage(message) => Self::ServerUnavailable(message),
+            CoreError::Storage(message) | CoreError::Authorization(message) => {
+                Self::ServerUnavailable(message)
+            }
             CoreError::SessionNotFound => Self::ServerUnavailable("session not found".into()),
         }
     }
@@ -46,6 +60,8 @@ pub enum SubscribeFailure {
     Unspecified,
     /// `$share/...` filters are not implemented.
     SharedSubscriptionsNotSupported,
+    /// ACL refused this filter.
+    NotAuthorized,
 }
 
 impl SubscribeFailure {
@@ -54,6 +70,7 @@ impl SubscribeFailure {
         match self {
             Self::Unspecified => 0x80,
             Self::SharedSubscriptionsNotSupported => 0x9E,
+            Self::NotAuthorized => 0x87,
         }
     }
 }
@@ -78,6 +95,8 @@ pub enum PublishError {
     ReceiveMaximumExceeded,
     /// The caller does not own the current session.
     StaleSession,
+    /// ACL refused this publish.
+    NotAuthorized,
 }
 
 /// Packet the connection should write after handling a client publish or release.

@@ -6,21 +6,21 @@ Focused guidance for AI coding agents working in this repository.
 
 ## Project
 
-Heron — Rust MQTT broker. The workspace contains `heron_codec`, `heron_client`, and a single-node broker: `heron_core` (sessions, topic tree, QoS routing), `heron_mqtt` (TCP and WebSocket), `heron_storage` (SeaORM + PostgreSQL), and the `heron` binary. Authentication, REST API, rules, Web GUI, and Raft are still planned (see [docs/dev/](docs/dev/)).
+Heron — Rust MQTT broker. The workspace contains `mqtt_codec`, `mqtt_client`, and a single-node broker: `heron_core` (sessions, topic tree, QoS routing), `heron_mqtt` (TCP and WebSocket), `heron_storage` (SeaORM + PostgreSQL), and the `heron` binary. Authentication, REST API, rules, Web GUI, and Raft are still planned (see [docs/dev/](docs/dev/)).
 
 ## Current workspace layout
 
 ```
 Cargo.toml          # workspace root (resolver = "2"); members = ["crates/*"]
 crates/
-  heron_codec/       # canonical MQTT codec library
+  mqtt_codec/       # canonical MQTT codec library
     src/lib.rs      # Encoder/Decoder traits, MqttError, v4/v5 re-exports
     src/v4/         # MQTT 3.1.1 (protocol level 4)
     src/v5/         # MQTT 5.0 (protocol level 5)
     src/error.rs    # MqttError (thiserror)
     tests/          # integration tests (v4/, v5/ subdirectories)
     examples/       # v4_encode, v4_builder, v5_encode, v5_builder
-  heron_client/      # async MQTT client library + `mqtt` CLI
+  mqtt_client/      # async MQTT client library + `mqtt` CLI
     src/lib.rs      # public API re-exports
     src/client.rs   # MqttClient handle (request/response commands)
     src/config.rs   # ClientConfig, Credentials, LastWill, Tls/Reconnect options
@@ -33,7 +33,9 @@ crates/
     examples/pubsub.rs
     tests/v4.rs, tests/v5.rs, tests/support/  # mock broker + integration tests
   heron_core/ # sessions, topic tree, QoS 0/1/2 router, Storage trait
-  heron_mqtt/ # TCP + WebSocket listeners and connection handler
+  heron_auth/ # password, token, client-certificate auth, ACL
+  heron_mqtt/ # TCP, WebSocket, and TLS listeners
+  heron_api/ # Axum REST API, health checks, Prometheus
   heron_storage/ # SeaORM PostgreSQL implementation of Storage
   heron/      # binary: `--config`, YAML, tokio runtime
 conf/broker.yaml    # example listener and storage config
@@ -46,21 +48,21 @@ docs/dev/           # design docs
 |------|---------|
 | Build | `cargo build --workspace` |
 | Test all | `cargo test --workspace` |
-| Test codec | `cargo test -p heron_codec` |
-| Test client | `cargo test -p heron_client` |
+| Test codec | `cargo test -p mqtt_codec` |
+| Test client | `cargo test -p mqtt_client` |
 | Test broker | `cargo test -p heron_core -p heron_mqtt` |
 | Run broker | `cargo run -p heron -- --config conf/broker.yaml` |
 | Lint | `cargo clippy --all-targets --all-features --locked -- -D warnings` |
 | Format | `cargo fmt` |
-| Run example | `cargo run -p heron_codec --example v4_encode` |
+| Run example | `cargo run -p mqtt_codec --example v4_encode` |
 
-Use `-p heron_codec` or `-p heron_client` to scope work to a specific crate.
+Use `-p mqtt_codec` or `-p mqtt_client` to scope work to a specific crate.
 
 ## Conventions
 
 - Rust edition 2024; dependencies: `bytes` (with serde), `thiserror`, `tokio`
 - Integration tests live under each crate's `tests/` directory (not inline `#[cfg(test)]`)
-- **`heron_codec` is the canonical codec crate** — do not add logic to any legacy `mqtt-codec` name
+- **`mqtt_codec` is the canonical codec crate** — do not add logic to any legacy `mqtt-codec` name
 - Never use `unwrap()`/`expect()` outside tests
 - Use `#[expect(clippy::lint)]` over `#[allow(...)]` with justification
 - Every `TODO` needs a linked issue: `// TODO(#42): ...`
@@ -68,15 +70,15 @@ Use `-p heron_codec` or `-p heron_client` to scope work to a specific crate.
 - Name tests descriptively: `process_should_return_error_when_input_empty()`
 - Documentation and README are written in Chinese (Simplified)
 
-## Key files (`heron_codec`)
+## Key files (`mqtt_codec`)
 
 | Area | Path |
 |------|------|
-| Traits | [crates/heron_codec/src/lib.rs](crates/heron_codec/src/lib.rs) |
-| v3.1.1 codec | [crates/heron_codec/src/v4/codec.rs](crates/heron_codec/src/v4/codec.rs), `encoder.rs`, `decoder.rs`, `validation.rs` |
-| v5.0 codec | [crates/heron_codec/src/v5/codec.rs](crates/heron_codec/src/v5/codec.rs), `properties_codec.rs`, `validation.rs` |
-| Packet types | [crates/heron_codec/src/v4/packet.rs](crates/heron_codec/src/v4/packet.rs), [crates/heron_codec/src/v5/packet.rs](crates/heron_codec/src/v5/packet.rs) |
-| Builders | [crates/heron_codec/src/v4/builder.rs](crates/heron_codec/src/v4/builder.rs), [crates/heron_codec/src/v5/builder.rs](crates/heron_codec/src/v5/builder.rs) |
+| Traits | [crates/mqtt_codec/src/lib.rs](crates/mqtt_codec/src/lib.rs) |
+| v3.1.1 codec | [crates/mqtt_codec/src/v4/codec.rs](crates/mqtt_codec/src/v4/codec.rs), `encoder.rs`, `decoder.rs`, `validation.rs` |
+| v5.0 codec | [crates/mqtt_codec/src/v5/codec.rs](crates/mqtt_codec/src/v5/codec.rs), `properties_codec.rs`, `validation.rs` |
+| Packet types | [crates/mqtt_codec/src/v4/packet.rs](crates/mqtt_codec/src/v4/packet.rs), [crates/mqtt_codec/src/v5/packet.rs](crates/mqtt_codec/src/v5/packet.rs) |
+| Builders | [crates/mqtt_codec/src/v4/builder.rs](crates/mqtt_codec/src/v4/builder.rs), [crates/mqtt_codec/src/v5/builder.rs](crates/mqtt_codec/src/v5/builder.rs) |
 
 ## Client design
 
@@ -91,12 +93,12 @@ Use `-p heron_codec` or `-p heron_client` to scope work to a specific crate.
 - When a connection ends, `SessionState::fail_pending()` answers every
   outstanding operation with `ClientError::Disconnected` — callers must never hang.
 - Integration tests drive the client against `tests/support`'s in-process mock
-  broker (real TCP + `heron_codec`); add new scenarios there rather than mocking
+  broker (real TCP + `mqtt_codec`); add new scenarios there rather than mocking
   the socket layer.
 
 ## Codec design
 
-- `Encoder<T>` and `Decoder` in `heron_codec/src/lib.rs` follow `tokio_util::codec` patterns (`Framed<S, C>`).
+- `Encoder<T>` and `Decoder` in `mqtt_codec/src/lib.rs` follow `tokio_util::codec` patterns (`Framed<S, C>`).
 - `v4` and `v5` are independent module trees: packet types, builders, codecs, validation.
 - **Encode** and **decode** both call `validate_packet()` — protocol MUST rules are enforced on the wire path.
 - v5 adds Properties, Reason Codes, and AUTH; property parsing lives in `v5/properties_codec.rs`.
@@ -106,18 +108,18 @@ Use `-p heron_codec` or `-p heron_client` to scope work to a specific crate.
 
 **Protocol codec changes**
 
-- Implement v3.1.1 vs v5.0 in `heron_codec/src/v4/` and `heron_codec/src/v5/` separately; keep APIs parallel where sensible.
-- After changing validation or wire format, run `cargo test -p heron_codec`.
+- Implement v3.1.1 vs v5.0 in `mqtt_codec/src/v4/` and `mqtt_codec/src/v5/` separately; keep APIs parallel where sensible.
+- After changing validation or wire format, run `cargo test -p mqtt_codec`.
 - Errors use `MqttError` at the crate root (not per-module codec error aliases).
 
 **Testing**
 
-- Integration tests live under `crates/heron_codec/tests/` and `crates/heron_mqtt/tests/`.
+- Integration tests live under `crates/mqtt_codec/tests/` and `crates/heron_mqtt/tests/`.
 - Broker session and routing tests live in `heron_core`. PostgreSQL round-trips need a reachable database URL passed to `PostgresStorage::connect`.
 
 **Common pitfalls**
 
-- The broker crates are `heron`, `heron_core`, `heron_mqtt`, and `heron_storage`.
+- The broker crates are `heron`, `heron_core`, `heron_auth`, `heron_mqtt`, `heron_api`, and `heron_storage`.
 - Codec validates packets; sessions, QoS state, and routing live in `heron_core`.
 - `Maximum packet size` is enforced only on the v5 `MqttCodec` wrapper when configured.
 
@@ -126,12 +128,14 @@ Use `-p heron_codec` or `-p heron_client` to scope work to a specific crate.
 | Component | Role |
 |-----------|------|
 | `heron` | Binary: `--config`, YAML, tokio runtime |
-| `heron_mqtt` | TCP and WebSocket listeners. CONNECT selects the v3.1.1 or v5.0 codec |
+| `heron_mqtt` | TCP、WebSocket 和 TLS 监听。CONNECT 选择 v3.1.1 或 v5.0 编解码 |
+| `heron_auth` | 用户名/密码、Token、客户端证书与 ACL |
+| `heron_api` | REST、健康检查、Prometheus |
 | `heron_core` | Sessions, topic tree, QoS 0/1/2 routing, `Storage` trait, in-memory store |
 | `heron_storage` | SeaORM + PostgreSQL. Creates tables on connect |
-| `heron_codec` | Packet encode/decode |
+| `mqtt_codec` | Packet encode/decode |
 
-Run: `cargo run -p heron -- --config conf/broker.yaml`. Default listeners are TCP `:1883` and WebSocket `:8083` with in-memory storage. TLS, authentication, and Raft are not in this version.
+Run: `cargo run -p heron -- --config conf/broker.yaml`. Default listeners are TCP `:1883` and WebSocket `:8083` with in-memory storage. TLS, authentication, and the management API stay off until `conf/broker.yaml` enables them. Raft is not in this version.
 
 ## Later architecture
 

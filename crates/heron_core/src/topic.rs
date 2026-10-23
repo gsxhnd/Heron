@@ -124,6 +124,20 @@ impl TopicTree {
         }
     }
 
+    /// Subscription filters and how many clients hold each one.
+    pub fn subscription_filters(&self) -> Vec<(String, usize)> {
+        let mut found = Vec::new();
+        collect_filters(&self.root, String::new(), &mut found);
+        found
+    }
+
+    /// Topics that currently hold a retained message.
+    pub fn retained_topics(&self) -> Vec<String> {
+        let mut topics: Vec<String> = self.retained.keys().cloned().collect();
+        topics.sort();
+        topics
+    }
+
     /// Retained messages that match `filter`.
     pub fn retained_for(&self, filter: &str) -> Vec<Retained> {
         self.retained
@@ -131,6 +145,20 @@ impl TopicTree {
             .filter(|message| topic_matches(filter, &message.topic))
             .cloned()
             .collect()
+    }
+}
+
+fn collect_filters(node: &Node, prefix: String, found: &mut Vec<(String, usize)>) {
+    if !prefix.is_empty() && !node.subs.is_empty() {
+        found.push((prefix.clone(), node.subs.len()));
+    }
+    for (name, child) in &node.children {
+        let next = if prefix.is_empty() {
+            name.clone()
+        } else {
+            format!("{prefix}/{name}")
+        };
+        collect_filters(child, next, found);
     }
 }
 

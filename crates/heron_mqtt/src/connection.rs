@@ -8,9 +8,9 @@ use heron_core::{
     DisconnectRequest, IncomingPublish, Outbound, PollEvent, ProtocolVersion, PublishError, QoS,
     SubOpts, SubscribeAck, SubscribeFailure, SubscribeFilter, Will,
 };
-use heron_codec::v4::{self, ConnectReturnCode, SubAckReturnCode};
-use heron_codec::v5::{self, ReasonCode};
-use heron_codec::{Decoder, Encoder, MqttError};
+use mqtt_codec::v4::{self, ConnectReturnCode, SubAckReturnCode};
+use mqtt_codec::v5::{self, ReasonCode};
+use mqtt_codec::{Decoder, Encoder, MqttError};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::time::{self, Instant};
 
@@ -36,6 +36,7 @@ pub async fn serve_connection<S>(
     io: &mut S,
     broker: Broker,
     peer: Option<String>,
+    certificate_identity: Option<String>,
 ) -> std::io::Result<()>
 where
     S: MqttIo,
@@ -50,7 +51,7 @@ where
     let Some(connect) = decode_one(&mut link, &mut buf).map_err(std::io::Error::other)? else {
         return Ok(());
     };
-    let request = match connect_request(connect, peer) {
+    let request = match connect_request(connect, peer, certificate_identity) {
         Ok(request) => request,
         Err(refusal) => {
             write_packets(io, &mut link, &[BrokerPacket::ConnAckRefused(refusal)]).await?;
@@ -442,6 +443,7 @@ async fn publish_client(
         Err(PublishError::InvalidTopic) => Ok(Step::Protocol(0x90)),
         Err(PublishError::MissingPacketId) => Ok(Step::Protocol(0x82)),
         Err(PublishError::ReceiveMaximumExceeded) => Ok(Step::Protocol(0x93)),
+        Err(PublishError::NotAuthorized) => Ok(Step::Protocol(0x87)),
     }
 }
 
@@ -460,6 +462,7 @@ async fn finish_qos2(
             Ok(Step::Continue)
         }
         Err(PublishError::StaleSession) => Ok(Step::Protocol(0)),
+        Err(PublishError::NotAuthorized) => Ok(Step::Protocol(0x87)),
         Err(_) => Ok(Step::Protocol(0x82)),
     }
 }
@@ -476,7 +479,11 @@ async fn ack_client(
         .map_err(std::io::Error::other)
 }
 
-fn connect_request(packet: Decoded, peer: Option<String>) -> Result<ConnectRequest, u8> {
+fn connect_request(
+    packet: Decoded,
+    peer: Option<String>,
+    certificate_identity: Option<String>,
+) -> Result<ConnectRequest, u8> {
     match packet {
         Decoded::V4(v4::Packet::Connect(connect)) => {
             if connect.protocol_level != 4 {
@@ -499,6 +506,9 @@ fn connect_request(packet: Decoded, peer: Option<String>) -> Result<ConnectReque
                 max_packet_size: 0,
                 enhanced_auth: false,
                 peer,
+                username: connect.username.filter(|username| !username.is_empty()),
+                password: connect.password,
+                certificate_identity: certificate_identity.clone(),
             })
         }
         Decoded::V5(packet) => {
@@ -533,6 +543,9 @@ fn connect_request(packet: Decoded, peer: Option<String>) -> Result<ConnectReque
                 max_packet_size: connect.properties.maximum_packet_size.unwrap_or(0),
                 enhanced_auth: false,
                 peer,
+                username: connect.username.filter(|username| !username.is_empty()),
+                password: connect.password,
+                certificate_identity: certificate_identity.clone(),
             })
         }
         _ => Err(0x82),
@@ -543,6 +556,8 @@ fn refusal_code(err: &ConnectError) -> u8 {
     match err {
         ConnectError::IdentifierRejected => 0x02,
         ConnectError::BadAuthenticationMethod => 0x8C,
+        ConnectError::BadCredentials => 0x04,
+        ConnectError::NotAuthorized => 0x05,
         ConnectError::ServerUnavailable(_) => 0x03,
     }
 }
@@ -955,6 +970,7 @@ fn v5_suback(ack: SubscribeAck) -> ReasonCode {
         SubscribeAck::Failed(SubscribeFailure::SharedSubscriptionsNotSupported) => {
             ReasonCode::SharedSubscriptionNotSupported
         }
+        SubscribeAck::Failed(SubscribeFailure::NotAuthorized) => ReasonCode::NotAuthorized,
     }
 }
 
@@ -969,6 +985,10 @@ fn v5_reason(code: u8) -> ReasonCode {
 fn v5_connack_reason(code: u8) -> ReasonCode {
     match code {
         0x02 => ReasonCode::ClientIdentifierNotValid,
+        0x03 => ReasonCode::ServerUnavailable,
+        0x04 => ReasonCode::BadUserNameOrPassword,
+        0x05 => ReasonCode::NotAuthorized,
+        0x8C => ReasonCode::BadAuthenticationMethod,
         other => v5_reason(other),
     }
 }

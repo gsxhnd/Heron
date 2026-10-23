@@ -1,0 +1,18 @@
+[package]
+name = "heron_auth"
+version = "0.4.0"
+edition = "2024"
+authors.workspace = true
+description = "Heron 认证与 ACL 授权"
+repository.workspace = true
+license.workspace = true
+categories.workspace = true
+keywords.workspace = true
+exclude.workspace = true
+
+[dependencies]
+async-trait = "0.1"
+argon2 = "0.5"
+getrandom = "0.2"
+thiserror = { workspace = true }
+tokio = { workspace = true }

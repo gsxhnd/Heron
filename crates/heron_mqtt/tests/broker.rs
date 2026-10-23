@@ -4,13 +4,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::BytesMut;
-use heron_core::{Broker, BrokerConfig, MemoryStorage};
-use heron_mqtt::Server;
 use futures_util::{SinkExt, StreamExt};
-use heron_client::{ClientConfig, Event, MqttClient, ProtocolVersion};
-use heron_codec::v4::{self, ConnectPacket, ConnectReturnCode, MqttCodec, Packet};
-use heron_codec::v5::{self, ReasonCode};
-use heron_codec::{Decoder, Encoder};
+use heron_auth::{AclAction, AclAuthorizer, AclRule, BuiltInAuthenticator, CertificatePolicy};
+use heron_core::{Broker, BrokerConfig, MemoryStorage};
+use heron_mqtt::{ClientCertMode, Server, acceptor_from_pem};
+use mqtt_client::{ClientConfig, Event, MqttClient, ProtocolVersion};
+use mqtt_codec::v4::{self, ConnectPacket, ConnectReturnCode, MqttCodec, Packet};
+use mqtt_codec::v5::{self, ReasonCode};
+use mqtt_codec::{Decoder, Encoder};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
@@ -34,7 +35,7 @@ async fn start() -> (
     .expect("bind");
     let tcp = server.tcp_addr().expect("tcp addr");
     let websocket = server.websocket_addr().expect("ws addr");
-    let (shutdown, rx) = tokio::sync::oneshot::channel();
+    let (shutdown, rx) = tokio::sync::oneshot::channel::<()>();
     tokio::spawn(async move {
         let _ = server
             .serve(async move {
@@ -292,7 +293,9 @@ async fn send_v5(addr: std::net::SocketAddr, packet: v5::Packet) -> v5::ConnAckP
 
 async fn send_v4(addr: std::net::SocketAddr, packet: Packet) -> v4::ConnAckPacket {
     let mut encoded = BytesMut::new();
-    MqttCodec::new().encode(packet, &mut encoded).expect("encode");
+    MqttCodec::new()
+        .encode(packet, &mut encoded)
+        .expect("encode");
     let mut buf = exchange(addr, &encoded).await;
     let packet = MqttCodec::new()
         .decode(&mut buf)
@@ -302,6 +305,21 @@ async fn send_v4(addr: std::net::SocketAddr, packet: Packet) -> v4::ConnAckPacke
         panic!("expected connack");
     };
     ack
+}
+
+fn v4_connect(client_id: &str, username: Option<&str>, password: Option<&[u8]>) -> ConnectPacket {
+    ConnectPacket {
+        protocol_name: "MQTT".into(),
+        protocol_level: 4,
+        clean_session: true,
+        keep_alive: 30,
+        client_id: client_id.into(),
+        username_flag: username.is_some(),
+        password_flag: password.is_some(),
+        username: username.map(str::to_owned),
+        password: password.map(bytes::Bytes::copy_from_slice),
+        ..ConnectPacket::default()
+    }
 }
 
 async fn exchange(addr: std::net::SocketAddr, encoded: &[u8]) -> BytesMut {
@@ -314,4 +332,175 @@ async fn exchange(addr: std::net::SocketAddr, encoded: &[u8]) -> BytesMut {
         .expect("read");
     assert!(n > 0, "broker closed without a connack");
     buf
+}
+
+#[tokio::test]
+async fn password_should_be_required_when_anonymous_access_is_disabled() {
+    use std::collections::HashMap;
+
+    let hash = heron_auth::hash_password("secret").expect("hash");
+    let mut users = HashMap::new();
+    users.insert("alice".to_owned(), hash);
+    let authenticator = BuiltInAuthenticator::new(false, users, Vec::new(), None).expect("auth");
+    let authorizer = AclAuthorizer::new(
+        vec![AclRule {
+            username: Some("alice".to_owned()),
+            client_id: None,
+            topic: "sensors/#".to_owned(),
+            action: AclAction::PubSub,
+            allow: true,
+            priority: 0,
+        }],
+        false,
+    );
+    let broker = Broker::open(Arc::new(MemoryStorage::new()), BrokerConfig::default())
+        .await
+        .expect("broker");
+    broker.install_security(Arc::new(authenticator), Arc::new(authorizer));
+    let server = Server::bind(broker, Some("127.0.0.1:0".parse().expect("addr")), None)
+        .await
+        .expect("bind");
+    let addr = server.tcp_addr().expect("tcp");
+    let (shutdown, rx) = tokio::sync::oneshot::channel::<()>();
+    tokio::spawn(async move {
+        let _ = server
+            .serve(async move {
+                let _ = rx.await;
+            })
+            .await;
+    });
+
+    let rejected = send_v4(addr, Packet::Connect(v4_connect("anon", None, None))).await;
+    assert_eq!(rejected.return_code, ConnectReturnCode::NotAuthorized);
+
+    let accepted = send_v4(
+        addr,
+        Packet::Connect(v4_connect("alice-client", Some("alice"), Some(b"secret"))),
+    )
+    .await;
+    assert_eq!(accepted.return_code, ConnectReturnCode::Accepted);
+
+    let mut config = client(addr, "sub", ProtocolVersion::V4, true);
+    config.credentials = Some(mqtt_client::Credentials {
+        username: "alice".to_owned(),
+        password: Some(bytes::Bytes::from_static(b"secret")),
+    });
+    let (subscriber, mut events) = MqttClient::new(config);
+    let _ = connected(&mut events).await;
+    let rejected = subscriber.subscribe(vec![("#".into(), 0)]).await;
+    assert!(rejected.is_err(), "wildcard must be denied by ACL");
+    subscriber
+        .subscribe(vec![("sensors/temp".into(), 0)])
+        .await
+        .expect("allowed filter");
+    drop(shutdown);
+}
+
+#[tokio::test]
+async fn mqtts_should_accept_tls_1_2_and_tls_1_3_and_a_client_certificate() {
+    use std::sync::Arc;
+
+    use rustls::ClientConfig;
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
+    use tokio_rustls::TlsConnector;
+
+    let ca_key = rcgen::KeyPair::generate().expect("ca key");
+    let mut ca_params = rcgen::CertificateParams::new(Vec::<String>::new()).expect("ca params");
+    ca_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+    let ca_cert = ca_params.self_signed(&ca_key).expect("ca cert");
+
+    let server_key = rcgen::KeyPair::generate().expect("server key");
+    let server_params =
+        rcgen::CertificateParams::new(vec!["localhost".to_owned()]).expect("server params");
+    let server_cert = server_params
+        .signed_by(&server_key, &ca_cert, &ca_key)
+        .expect("server cert");
+
+    let client_key = rcgen::KeyPair::generate().expect("client key");
+    let mut client_params = rcgen::CertificateParams::new(Vec::<String>::new()).expect("client");
+    client_params
+        .distinguished_name
+        .push(rcgen::DnType::CommonName, "sensor-7");
+    let client_cert = client_params
+        .signed_by(&client_key, &ca_cert, &ca_key)
+        .expect("client cert");
+
+    let acceptor = acceptor_from_pem(
+        server_cert.pem().as_bytes(),
+        server_key.serialize_pem().as_bytes(),
+        Some(ca_cert.pem().as_bytes()),
+        ClientCertMode::Optional,
+    )
+    .expect("acceptor");
+
+    let authenticator = BuiltInAuthenticator::new(
+        false,
+        std::collections::HashMap::new(),
+        Vec::new(),
+        Some(CertificatePolicy::allowlist(["sensor-7"])),
+    )
+    .expect("auth");
+    let broker = Broker::open(Arc::new(MemoryStorage::new()), BrokerConfig::default())
+        .await
+        .expect("broker");
+    broker.install_security(Arc::new(authenticator), Arc::new(heron_auth::AllowAll));
+    let mut server = Server::bind(broker, None, None).await.expect("bind");
+    server
+        .bind_secure(Some("127.0.0.1:0".parse().expect("addr")), None, acceptor)
+        .await
+        .expect("mqtts");
+    let addr = server.mqtts_addr().expect("mqtts");
+    let (shutdown, rx) = tokio::sync::oneshot::channel::<()>();
+    tokio::spawn(async move {
+        let _ = server
+            .serve(async move {
+                let _ = rx.await;
+            })
+            .await;
+    });
+
+    let mut roots = rustls::RootCertStore::empty();
+    for cert in rustls_pemfile::certs(&mut std::io::Cursor::new(ca_cert.pem().as_bytes())) {
+        roots.add(cert.expect("ca der")).expect("root");
+    }
+    let server_name = ServerName::try_from("localhost").expect("sni");
+    let connect = Packet::Connect(v4_connect("tls-client", None, None));
+    let mut encoded = BytesMut::new();
+    MqttCodec::new()
+        .encode(connect, &mut encoded)
+        .expect("encode");
+
+    for version in [&rustls::version::TLS12, &rustls::version::TLS13] {
+        let client_certs = vec![CertificateDer::from(client_cert.der().to_vec())];
+        let client_key = PrivateKeyDer::Pkcs8(client_key.serialize_der().into());
+        let config =
+            ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+                .with_protocol_versions(&[version])
+                .expect("versions")
+                .with_root_certificates(roots.clone())
+                .with_client_auth_cert(client_certs, client_key)
+                .expect("client config");
+        let connector = TlsConnector::from(Arc::new(config));
+        let tcp = TcpStream::connect(addr).await.expect("tcp");
+        let mut tls = connector
+            .connect(server_name.clone(), tcp)
+            .await
+            .expect("handshake");
+        tls.write_all(&encoded).await.expect("write");
+        let mut buf = BytesMut::new();
+        let n = timeout(Duration::from_secs(3), tls.read_buf(&mut buf))
+            .await
+            .expect("timeout")
+            .expect("read");
+        assert!(n > 0);
+        let packet = MqttCodec::new()
+            .decode(&mut buf)
+            .expect("decode")
+            .expect("packet");
+        let Packet::ConnAck(ack) = packet else {
+            panic!("expected connack");
+        };
+        assert_eq!(ack.return_code, ConnectReturnCode::Accepted);
+    }
+    drop(shutdown);
 }
