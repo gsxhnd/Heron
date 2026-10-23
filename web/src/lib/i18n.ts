@@ -1,3 +1,6 @@
+import i18n from "i18next"
+import { initReactI18next } from "react-i18next"
+
 export type Locale = "zh-CN" | "en-US"
 
 const zhCN = {
@@ -48,9 +51,9 @@ const zhCN = {
   "clients.online": "在线",
   "clients.offline": "离线",
   "clients.all": "全部",
-  "clients.page": "第 {page} 页，共 {total} 条",
+  "clients.page": "第 {{page}} 页，共 {{total}} 条",
   "clients.confirmDisconnect": "断开这个客户端？",
-  "clients.confirmBatch": "断开所选的 {count} 个客户端？",
+  "clients.confirmBatch": "断开所选的 {{count}} 个客户端？",
   "clients.detail": "客户端详情",
   "clients.username": "用户名",
   "clients.anonymous": "匿名",
@@ -71,7 +74,7 @@ const zhCN = {
   "topics.binary": "载荷不是 UTF-8 文本",
   "topics.publishTitle": "发布消息",
   "topics.clearTitle": "清除保留消息？",
-  "topics.clearBody": "向 {topic} 发布空载荷并设置 retain。",
+  "topics.clearBody": "向 {{topic}} 发布空载荷并设置 retain。",
   "subscriptions.title": "订阅",
   "subscriptions.description": "当前驻留在内存里的订阅关系。",
   "subscriptions.empty": "还没有订阅",
@@ -111,8 +114,8 @@ const zhCN = {
   "settings.runtime": "运行状态",
   "notices.title": "通知",
   "notices.empty": "还没有连接变化",
-  "notices.connected": "{id} 已连接",
-  "notices.disconnected": "{id} 已断开",
+  "notices.connected": "{{id}} 已连接",
+  "notices.disconnected": "{{id}} 已断开",
   "status.loading": "正在加载",
   "status.error": "请求失败",
   "status.unauthorized": "需要 Bearer Token。可以在设置里填写。",
@@ -122,7 +125,7 @@ const zhCN = {
   "common.no": "否",
   "common.previous": "上一页",
   "common.next": "下一页",
-  "common.seconds": "{value} 秒",
+  "common.seconds": "{{value}} 秒",
 } as const
 
 const enUS: Record<keyof typeof zhCN, string> = {
@@ -173,9 +176,9 @@ const enUS: Record<keyof typeof zhCN, string> = {
   "clients.online": "Online",
   "clients.offline": "Offline",
   "clients.all": "All",
-  "clients.page": "Page {page}, {total} total",
+  "clients.page": "Page {{page}}, {{total}} total",
   "clients.confirmDisconnect": "Disconnect this client?",
-  "clients.confirmBatch": "Disconnect {count} selected clients?",
+  "clients.confirmBatch": "Disconnect {{count}} selected clients?",
   "clients.detail": "Client",
   "clients.username": "Username",
   "clients.anonymous": "Anonymous",
@@ -196,7 +199,7 @@ const enUS: Record<keyof typeof zhCN, string> = {
   "topics.binary": "Payload is not UTF-8 text",
   "topics.publishTitle": "Publish",
   "topics.clearTitle": "Clear the retained message?",
-  "topics.clearBody": "Publish an empty retained payload to {topic}.",
+  "topics.clearBody": "Publish an empty retained payload to {{topic}}.",
   "subscriptions.title": "Subscriptions",
   "subscriptions.description": "Subscriptions currently resident in memory.",
   "subscriptions.empty": "No subscriptions yet",
@@ -236,8 +239,8 @@ const enUS: Record<keyof typeof zhCN, string> = {
   "settings.runtime": "Runtime",
   "notices.title": "Notices",
   "notices.empty": "No connection changes yet",
-  "notices.connected": "{id} connected",
-  "notices.disconnected": "{id} disconnected",
+  "notices.connected": "{{id}} connected",
+  "notices.disconnected": "{{id}} disconnected",
   "status.loading": "Loading",
   "status.error": "Request failed",
   "status.unauthorized": "A bearer token is required. Add one in Settings.",
@@ -247,27 +250,44 @@ const enUS: Record<keyof typeof zhCN, string> = {
   "common.no": "No",
   "common.previous": "Previous",
   "common.next": "Next",
-  "common.seconds": "{value} seconds",
+  "common.seconds": "{{value}} seconds",
 }
 
 export type MessageKey = keyof typeof zhCN
 
-const catalogs: Record<Locale, Record<MessageKey, string>> = {
-  "zh-CN": zhCN,
-  "en-US": enUS,
+const resources = {
+  "zh-CN": { translation: zhCN },
+  "en-US": { translation: enUS },
+} as const
+
+function storedLocale(): Locale {
+  if (typeof localStorage === "undefined") {
+    return "zh-CN"
+  }
+  try {
+    const raw = localStorage.getItem("heron-preferences")
+    if (!raw) {
+      return "zh-CN"
+    }
+    const parsed = JSON.parse(raw) as { state?: { locale?: string } }
+    return parsed.state?.locale === "en-US" ? "en-US" : "zh-CN"
+  } catch {
+    return "zh-CN"
+  }
 }
 
-export function translate(locale: Locale, key: MessageKey, values?: Record<string, string | number>): string {
-  let text: string = catalogs[locale][key]
-  if (!values) {
-    return text
-  }
-  for (const [name, value] of Object.entries(values)) {
-    text = text.replaceAll(`{${name}}`, String(value))
-  }
-  return text
-}
+void i18n.use(initReactI18next).init({
+  resources,
+  lng: storedLocale(),
+  fallbackLng: "zh-CN",
+  supportedLngs: ["zh-CN", "en-US"],
+  keySeparator: false,
+  nsSeparator: false,
+  interpolation: { escapeValue: false },
+})
 
 export function catalogKeys(locale: Locale): string[] {
-  return Object.keys(catalogs[locale]).sort()
+  return Object.keys(resources[locale].translation).sort()
 }
+
+export default i18n

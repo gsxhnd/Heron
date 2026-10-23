@@ -1,7 +1,7 @@
 import { useEffect } from "react"
 
 import { parseClientNotice, parseSnapshot, eventsUrl } from "@/lib/events"
-import { translate } from "@/lib/i18n"
+import i18n from "@/lib/i18n"
 import { toast } from "@/components/ui/toast"
 import { useLive } from "@/stores/live"
 import { usePreferences } from "@/stores/preferences"
@@ -45,10 +45,9 @@ export function LiveSocket() {
           return
         }
         useLive.getState().pushNotice(notice)
-        const locale = usePreferences.getState().locale
         const key = notice.action === "connected" ? "notices.connected" : "notices.disconnected"
         toast.add({
-          title: translate(locale, key, { id: notice.client_id }),
+          title: i18n.t(key, { id: notice.client_id }),
           type: notice.action === "connected" ? "success" : "warning",
         })
       })

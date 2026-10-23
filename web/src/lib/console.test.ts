@@ -3,7 +3,7 @@ import test from "node:test"
 
 import { apiUrl, eventsUrl, parseClientNotice, parseSnapshot } from "./events.ts"
 import { formatRate, formatUptime, protocolLabel } from "./format.ts"
-import { catalogKeys, translate } from "./i18n.ts"
+import i18n, { catalogKeys } from "./i18n.ts"
 import { buildTopicTree } from "./topics.ts"
 import { rulePayload } from "./api.ts"
 
@@ -19,8 +19,8 @@ test("formatters should render uptime, rate, and protocol labels", () => {
 
 test("locales should expose the same keys", () => {
   assert.deepEqual(catalogKeys("zh-CN"), catalogKeys("en-US"))
-  assert.equal(translate("zh-CN", "notices.connected", { id: "a" }), "a 已连接")
-  assert.equal(translate("en-US", "notices.disconnected", { id: "a" }), "a disconnected")
+  assert.equal(i18n.t("notices.connected", { lng: "zh-CN", id: "a" }), "a 已连接")
+  assert.equal(i18n.t("notices.disconnected", { lng: "en-US", id: "a" }), "a disconnected")
 })
 
 test("topic tree should nest filters and keep retained flags on the leaf", () => {
