@@ -20,6 +20,7 @@ heron_mqtt = { path = "../heron_mqtt" }
 heron_storage = { path = "../heron_storage" }
 heron_auth = { path = "../heron_auth" }
 heron_api = { path = "../heron_api" }
+heron_rules = { path = "../heron_rules" }
 tokio = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }

@@ -145,6 +145,31 @@ pub struct StoredMessage {
     pub state: MessageState,
 }
 
+/// Rule row, mirroring the rule engine's in-memory `RuleRecord`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredRule {
+    /// Engine-assigned identifier. Primary key of the storage row.
+    pub id: u64,
+    /// Unique name.
+    pub name: String,
+    /// Optional description.
+    pub description: Option<String>,
+    /// Disabled rules stay stored and do not run.
+    pub enabled: bool,
+    /// Higher values run first.
+    pub priority: i32,
+    /// MQTT topic filter, including `$events/...` lifecycle topics.
+    pub topic_filter: String,
+    /// Condition serialized as JSON (`null`, `{"sql":[...]}`, `{"all":[...]}`, `{"any":[...]}`).
+    pub conditions: String,
+    /// Actions serialized as JSON.
+    pub actions: String,
+    /// RFC 3339 creation time.
+    pub created_at: String,
+    /// RFC 3339 update time.
+    pub updated_at: String,
+}
+
 /// Operations the broker emits after changing in-memory state.
 #[derive(Debug, Clone)]
 pub enum WriteOp {
@@ -180,6 +205,10 @@ pub enum WriteOp {
     },
     /// Delete every inflight message for a client.
     ClearMessages(String),
+    /// Insert or replace a rule.
+    UpsertRule(StoredRule),
+    /// Delete a rule by id.
+    DeleteRule(u64),
 }
 
 /// Durable store. The in-memory broker is the hot path; this trait is write-through.
@@ -196,6 +225,9 @@ pub trait Storage: Send + Sync + 'static {
 
     /// Load every inflight or queued message.
     async fn load_messages(&self) -> Result<Vec<StoredMessage>, CoreError>;
+
+    /// Load every rule.
+    async fn load_rules(&self) -> Result<Vec<StoredRule>, CoreError>;
 
     /// Apply one write.
     async fn apply(&self, op: &WriteOp) -> Result<(), CoreError>;

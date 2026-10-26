@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use heron_core::{
     Broker, BrokerConfig, ClientFlow, ConnectError, ConnectRequest, IncomingPublish, MemoryStorage,
-    Outbound, PollEvent, ProtocolVersion, QoS, SubOpts, SubscribeAck, SubscribeFailure,
+    Outbound, PollEvent, ProtocolVersion, QoS, Storage, SubOpts, SubscribeAck, SubscribeFailure,
     SubscribeFilter,
 };
 use heron_rules::{Hook, HookContext, HookError, RuleEngine, RuleInput, parse_rule_sql};
@@ -411,4 +411,92 @@ async fn hook_plugin_should_reject_a_publish_before_rules_run() {
         .poll(&subscriber.client_id, subscriber.epoch, 8)
         .await;
     assert!(payloads(&events).is_empty());
+}
+
+async fn persisted_rules(storage: &Arc<MemoryStorage>) -> Vec<heron_core::StoredRule> {
+    for _ in 0..100 {
+        let rules = storage.load_rules().await.expect("load");
+        if !rules.is_empty() {
+            return rules;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    Vec::new()
+}
+
+#[tokio::test]
+async fn successful_crud_should_write_through_to_storage() {
+    let storage = Arc::new(MemoryStorage::new());
+    let engine = RuleEngine::new();
+    engine.set_storage(storage.clone());
+
+    let created = engine
+        .insert(input(
+            "hot",
+            "sensors/#",
+            serde_json::Value::Null,
+            serde_json::json!([{"type":"drop"}]),
+        ))
+        .expect("insert");
+
+    let rules = persisted_rules(&storage).await;
+    assert_eq!(rules.len(), 1);
+    assert_eq!((rules[0].id, rules[0].name.as_str()), (created.id, "hot"));
+    assert!(rules[0].actions.contains("drop"));
+
+    engine
+        .update(
+            created.id,
+            input(
+                "cold",
+                "alerts/#",
+                serde_json::Value::Null,
+                serde_json::json!([{"type":"drop"}]),
+            ),
+        )
+        .expect("update");
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let rules = storage.load_rules().await.expect("reload");
+    assert_eq!(rules.len(), 1);
+    assert_eq!(rules[0].name, "cold");
+
+    engine.delete(created.id).expect("delete");
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let rules = storage.load_rules().await.expect("redelete");
+    assert!(rules.is_empty(), "delete should be persisted");
+}
+
+#[tokio::test]
+async fn restore_should_rebuild_rules_and_continue_ids_from_storage() {
+    let storage = Arc::new(MemoryStorage::new());
+    let first = RuleEngine::new();
+    first.set_storage(storage.clone());
+    let created = first
+        .insert(input(
+            "hot",
+            "sensors/#",
+            serde_json::Value::Null,
+            serde_json::json!([{"type":"drop"}]),
+        ))
+        .expect("insert");
+    let stored = persisted_rules(&storage).await;
+    assert!(!stored.is_empty());
+
+    let revived = RuleEngine::new();
+    revived.restore(stored).await;
+    let rules = revived.list();
+    assert_eq!(rules.len(), 1);
+    assert_eq!(rules[0].id, created.id);
+    assert_eq!(rules[0].name, "hot");
+    assert_eq!(rules[0].actions, created.actions);
+
+    let moved = revived
+        .insert(input(
+            "second",
+            "alerts/#",
+            serde_json::Value::Null,
+            serde_json::json!([{"type":"drop"}]),
+        ))
+        .expect("insert after restore");
+    assert!(moved.id > created.id, "ids must never be reused");
 }

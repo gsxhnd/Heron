@@ -13,12 +13,12 @@
 
 | 组件 | 技术 |
 |------|------|
-| 框架 | React |
-| UI 库 | shadcn/ui |
+| 框架 | React 19 + Vite |
+| UI 库 | shadcn/ui + Tailwind CSS 4 |
 | 路由 | TanStack Router |
-| 图表 | Recharts（shadcn Chart） |
+| 图表 | Recharts |
 | 状态管理 | Zustand |
-| 构建工具 | Vite |
+| 国际化 | i18next（zh-CN / en-US） |
 
 ## 页面结构
 
@@ -26,9 +26,9 @@
 - 客户端 (Clients) — 在线客户端、会话管理
 - 主题 (Topics) — 主题列表、保留消息
 - 订阅 (Subscriptions)
-- 集群 (Cluster) — 节点状态、Raft 信息
-- 监控 (Monitoring) — 实时指标、告警配置
-- 设置 (Settings) — 系统配置、安全设置、日志管理
+- 规则 (Rules) — 规则增删改查
+- 设置 (Settings) — 管理 API 地址、token、语言与主题
+- 集群 (Cluster)、监控 (Monitoring) — 规划中，随 v0.7.0 集群实现
 
 ## 仪表盘
 

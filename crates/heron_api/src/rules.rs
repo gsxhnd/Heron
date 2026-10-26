@@ -1,20 +1,18 @@
 //! Rule configuration backed by [`heron_rules::RuleEngine`].
 //!
-//! Records stay in memory and disappear on restart. Successful responses include
-//! `"engine": "active"` because the same engine is installed on the broker.
+//! The engine is supplied by the broker owner; records persist through
+//! [`heron_core::Storage`] when one is attached to the engine. Successful
+//! responses include `"engine": "active"` because the same engine is installed
+//! on the broker.
 
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use heron_rules::{RuleEngine, RuleError, RuleInput};
+use heron_rules::{RuleError, RuleInput};
 use serde_json::{Value, json};
 
 use crate::{AppState, error_response};
-
-pub(crate) fn engine() -> RuleEngine {
-    RuleEngine::new()
-}
 
 pub(crate) async fn list_rules(State(state): State<AppState>) -> Response {
     rule_ok(json!(state.rules.list()))

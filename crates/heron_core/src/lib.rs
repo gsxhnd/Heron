@@ -34,7 +34,7 @@ pub use message::{
 };
 pub use qos::QoS;
 pub use storage::{
-    Direction, MessageState, Storage, StoredClient, StoredMessage, StoredRetained,
+    Direction, MessageState, Storage, StoredClient, StoredMessage, StoredRetained, StoredRule,
     StoredSubscription, WriteOp,
 };
 pub use topic::{FilterClass, classify_filter, topic_matches, valid_topic_name};

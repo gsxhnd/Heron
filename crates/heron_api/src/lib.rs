@@ -29,20 +29,26 @@ use serde_json::{Value, json};
 /// HTTP listener for the management API.
 pub struct ApiServer {
     broker: Broker,
+    engine: RuleEngine,
     token: Option<String>,
     listener: tokio::net::TcpListener,
 }
 
 impl ApiServer {
     /// Bind `addr`. `token` is the bearer secret; `None` leaves the API open.
+    ///
+    /// The rule engine is supplied by the caller so hooks stay installed even when
+    /// the API itself is disabled.
     pub async fn bind(
         broker: Broker,
+        engine: RuleEngine,
         addr: SocketAddr,
         token: Option<String>,
     ) -> std::io::Result<Self> {
         let listener = tokio::net::TcpListener::bind(addr).await?;
         Ok(Self {
             broker,
+            engine,
             token,
             listener,
         })
@@ -58,7 +64,7 @@ impl ApiServer {
         self,
         shutdown: impl Future<Output = ()> + Send + 'static,
     ) -> std::io::Result<()> {
-        let app = router(self.broker, self.token);
+        let app = router(self.broker, self.engine, self.token);
         axum::serve(self.listener, app)
             .with_graceful_shutdown(shutdown)
             .await
@@ -66,13 +72,14 @@ impl ApiServer {
 }
 
 /// Router used by [`ApiServer`] and tests.
-pub fn router(broker: Broker, token: Option<String>) -> Router {
-    let rules = rules::engine();
-    broker.install_hooks(rules.hooks());
+///
+/// The engine must already be installed on the broker (`install_hooks`) by the
+/// owner; the router only exposes its CRUD API.
+pub fn router(broker: Broker, engine: RuleEngine, token: Option<String>) -> Router {
     let state = AppState {
         broker,
         token,
-        rules,
+        rules: engine,
     };
     let protected = Router::new()
         .route("/metrics", get(metrics))

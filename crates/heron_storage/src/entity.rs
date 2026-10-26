@@ -135,3 +135,30 @@ pub mod message {
 
     impl ActiveModelBehavior for ActiveModel {}
 }
+
+/// `rules`
+pub mod rule {
+    use super::*;
+
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+    #[sea_orm(table_name = "rules")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        #[sea_orm(unique)]
+        pub name: String,
+        pub description: Option<String>,
+        pub enabled: bool,
+        pub priority: i32,
+        pub topic_filter: String,
+        pub conditions: Option<String>,
+        pub actions: String,
+        pub created_at: DateTime,
+        pub updated_at: DateTime,
+    }
+
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}

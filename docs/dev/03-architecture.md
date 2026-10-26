@@ -1,6 +1,6 @@
 # 系统架构
 
-> 状态: 单节点 Broker、TLS、认证授权、REST API 与 Web GUI 已实现。规则引擎与 Raft 仍为设计。
+> 状态: 单节点 Broker、TLS、认证授权、REST API 与 Web GUI 已实现。规则引擎已落地（生命周期钩子 + 持久化）。Raft 仍为设计。
 
 ## 整体架构
 
@@ -41,7 +41,7 @@
 │  └────────────────────────────────────────────────────────────┘  │
 │                                                                 │
 │  ┌────────────────────────────────────────────────────────────┐  │
-│  │                    Cluster Layer (Raft + gRPC)             │  │
+│  │     Cluster Layer (Raft + gRPC) — 规划中 (v0.7.0)          │  │
 │  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │  │
 │  │  │ Raft Node   │  │  Log Store  │  │  State Machine      │ │  │
 │  │  └─────────────┘  └─────────────┘  └─────────────────────┘ │  │
@@ -67,14 +67,15 @@
 
 - Authenticator: 用户名/密码、Token、客户端证书身份
 - Authorizer: 优先级 ACL
-- 钩子插件仍未实现
+- 静态钩子 `BrokerHooks` 已挂接连接、订阅与发布流程
 
-### heron_rules (规则引擎) — 计划中
+### heron_rules (规则引擎) — 已实现
 
-- Rule Parser: 规则解析器
-- Rule Engine: 规则执行引擎
-- Actions: 动作执行器
-- Hooks: 钩子系统
+- Rule Parser: 规则解析器 (SQL 形式与 `all`/`any` 条件)
+- Rule Engine: 规则执行引擎，通过 `BrokerHooks` 接入 Broker 生命周期
+- Actions: `log`、`drop`、`reject`、`republish`、`transform`、`webhook`
+- Hooks: `Hook` trait 钩子插件，在内置规则之前运行
+- 规则经 `Storage` 持久化，重启后恢复
 
 ### heron_api (REST API) — 已实现
 
@@ -184,14 +185,16 @@ Client A (Publisher)
 
 | 组件 | 技术 | 版本 |
 |------|------|------|
-| 语言 | Rust | 2021 Edition |
+| 语言 | Rust（Edition 2024） | 1.85+ |
 | 异步运行时 | Tokio | 1.x |
-| REST 框架 | Axum | 0.7+ |
-| gRPC | Tonic | 0.12+ |
-| ORM | SeaORM | 1.x |
+| REST 框架 | Axum | 0.8 |
+| ORM | SeaORM | 1.1 |
 | 数据库 | PostgreSQL | 14+ |
+| HTTP 客户端 | reqwest | 0.12 |
 | 序列化 | bytes, serde | - |
-| 前端 | Vue 3 | 3.x |
-| UI 组件 | Reka UI | - |
-| 状态管理 | Pinia | 2.x |
-| 构建工具 | Vite | 5.x |
+| 前端 | React | 19.x |
+| UI 组件 | shadcn/ui + Tailwind CSS | Tailwind 4 |
+| 状态管理 | Zustand | 5.x |
+| 构建工具 | Vite | 8.x |
+
+gRPC (Tonic) 属于集群模块规划，尚未引入。

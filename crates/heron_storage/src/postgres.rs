@@ -7,14 +7,14 @@ use bytes::Bytes;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use heron_core::{
     CoreError, Direction, MessageState, ProtocolVersion, QoS, Storage, StoredClient, StoredMessage,
-    StoredRetained, StoredSubscription, Will, WriteOp,
+    StoredRetained, StoredRule, StoredSubscription, Will, WriteOp,
 };
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, Database, DatabaseConnection,
     EntityTrait, QueryFilter, Set,
 };
 
-use crate::entity::{client, message, retained, session, subscription};
+use crate::entity::{client, message, retained, rule, session, subscription};
 use crate::schema::SCHEMA;
 
 /// PostgreSQL storage using SeaORM.
@@ -87,6 +87,11 @@ impl Storage for PostgresStorage {
         Ok(rows.into_iter().filter_map(stored_message).collect())
     }
 
+    async fn load_rules(&self) -> Result<Vec<StoredRule>, CoreError> {
+        let rows = rule::Entity::find().all(&self.db).await.map_err(db_err)?;
+        Ok(rows.into_iter().map(stored_rule).collect())
+    }
+
     async fn apply(&self, op: &WriteOp) -> Result<(), CoreError> {
         match op {
             WriteOp::UpsertClient(client) => self.upsert_client(client).await,
@@ -149,6 +154,15 @@ impl Storage for PostgresStorage {
             WriteOp::ClearMessages(client_id) => {
                 message::Entity::delete_many()
                     .filter(message::Column::ClientId.eq(client_id))
+                    .exec(&self.db)
+                    .await
+                    .map_err(db_err)?;
+                Ok(())
+            }
+            WriteOp::UpsertRule(rule) => self.upsert_rule(rule).await,
+            WriteOp::DeleteRule(rule_id) => {
+                rule::Entity::delete_many()
+                    .filter(rule::Column::Id.eq(i64::try_from(*rule_id).unwrap_or(0)))
                     .exec(&self.db)
                     .await
                     .map_err(db_err)?;
@@ -313,6 +327,48 @@ impl PostgresStorage {
         Ok(())
     }
 
+    async fn upsert_rule(&self, row: &StoredRule) -> Result<(), CoreError> {
+        let now = Utc::now().naive_utc();
+        let id = i64::try_from(row.id).unwrap_or(0);
+        let existing = rule::Entity::find_by_id(id)
+            .one(&self.db)
+            .await
+            .map_err(db_err)?;
+        let conditions = match row.conditions.as_str() {
+            "" | "null" => None,
+            other => Some(other.to_owned()),
+        };
+        if let Some(existing) = existing {
+            let mut active: rule::ActiveModel = existing.into();
+            active.name = Set(row.name.clone());
+            active.description = Set(row.description.clone());
+            active.enabled = Set(row.enabled);
+            active.priority = Set(row.priority);
+            active.topic_filter = Set(row.topic_filter.clone());
+            active.conditions = Set(conditions);
+            active.actions = Set(row.actions.clone());
+            active.updated_at = Set(now);
+            active.update(&self.db).await.map_err(db_err)?;
+        } else {
+            rule::ActiveModel {
+                id: Set(id),
+                name: Set(row.name.clone()),
+                description: Set(row.description.clone()),
+                enabled: Set(row.enabled),
+                priority: Set(row.priority),
+                topic_filter: Set(row.topic_filter.clone()),
+                conditions: Set(conditions),
+                actions: Set(row.actions.clone()),
+                created_at: Set(parse_rfc3339(&row.created_at).unwrap_or(now)),
+                updated_at: Set(now),
+            }
+            .insert(&self.db)
+            .await
+            .map_err(db_err)?;
+        }
+        Ok(())
+    }
+
     async fn upsert_message(&self, row: &StoredMessage) -> Result<(), CoreError> {
         let now = Utc::now().naive_utc();
         let size = i32::try_from(row.payload.len()).ok();
@@ -405,6 +461,33 @@ fn stored_retained(row: retained::Model) -> StoredRetained {
         payload: Bytes::from(row.payload.unwrap_or_default()),
         qos: qos_from_i16(row.qos),
     }
+}
+
+fn stored_rule(row: rule::Model) -> StoredRule {
+    StoredRule {
+        id: u64::try_from(row.id).unwrap_or(0),
+        name: row.name,
+        description: row.description,
+        enabled: row.enabled,
+        priority: row.priority,
+        topic_filter: row.topic_filter,
+        conditions: row.conditions.unwrap_or_else(|| "null".to_owned()),
+        actions: row.actions,
+        created_at: row
+            .created_at
+            .and_utc()
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        updated_at: row
+            .updated_at
+            .and_utc()
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+    }
+}
+
+fn parse_rfc3339(text: &str) -> Option<NaiveDateTime> {
+    DateTime::parse_from_rfc3339(text)
+        .ok()
+        .map(|time| time.with_timezone(&Utc).naive_utc())
 }
 
 fn stored_message(row: message::Model) -> Option<StoredMessage> {

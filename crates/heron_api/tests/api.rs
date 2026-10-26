@@ -11,6 +11,7 @@ use heron_core::{
     Broker, BrokerConfig, ConnectRequest, IncomingPublish, MemoryStorage, Outbound, PollEvent,
     ProtocolVersion, QoS, SubOpts, SubscribeAck, SubscribeFilter,
 };
+use heron_rules::RuleEngine;
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use tokio_tungstenite::connect_async;
@@ -55,7 +56,7 @@ async fn body_json(response: axum::response::Response) -> Value {
 async fn health_should_stay_open_and_management_routes_should_require_a_bearer_token() {
     let broker = broker().await;
     broker.connect(connect("client-1")).await.expect("connect");
-    let app = router(broker, Some("secret".to_owned()));
+    let app = router(broker, RuleEngine::new(), Some("secret".to_owned()));
 
     let health = app
         .clone()
@@ -208,7 +209,7 @@ async fn health_should_stay_open_and_management_routes_should_require_a_bearer_t
 
 #[tokio::test]
 async fn delete_client_should_return_not_found_when_the_session_is_offline() {
-    let app = router(broker().await, None);
+    let app = router(broker().await, RuleEngine::new(), None);
     let response = app
         .oneshot(
             Request::builder()
@@ -233,7 +234,7 @@ async fn client_list_should_filter_by_identifier_and_protocol_and_expose_session
     v5.session_expiry = Some(120);
     broker.connect(connect("sensor-east")).await.expect("v4");
     broker.connect(v5).await.expect("v5");
-    let app = router(broker, None);
+    let app = router(broker, RuleEngine::new(), None);
 
     let listed = app
         .clone()
@@ -254,7 +255,7 @@ async fn client_list_should_filter_by_identifier_and_protocol_and_expose_session
 
 #[tokio::test]
 async fn topic_detail_should_return_retained_text_and_clear_when_an_empty_retain_is_published() {
-    let app = router(broker().await, None);
+    let app = router(broker().await, RuleEngine::new(), None);
     let published = app
         .clone()
         .oneshot(
@@ -312,7 +313,7 @@ async fn topic_detail_should_return_retained_text_and_clear_when_an_empty_retain
 
 #[tokio::test]
 async fn rules_should_round_trip_in_memory_and_report_that_the_engine_is_active() {
-    let app = router(broker().await, Some("secret".to_owned()));
+    let app = router(broker().await, RuleEngine::new(), Some("secret".to_owned()));
     let denied = app
         .clone()
         .oneshot(
@@ -414,7 +415,9 @@ async fn rules_should_round_trip_in_memory_and_report_that_the_engine_is_active(
 #[tokio::test]
 async fn rules_should_republish_a_matching_publish_to_subscribers() {
     let broker = broker().await;
-    let app = router(broker.clone(), None);
+    let engine = RuleEngine::new();
+    broker.install_hooks(engine.hooks());
+    let app = router(broker.clone(), engine, None);
     let created = app
         .oneshot(
             Request::builder()
@@ -494,6 +497,7 @@ async fn events_socket_should_require_a_token_and_push_a_snapshot_then_a_connect
     let broker = broker().await;
     let server = ApiServer::bind(
         broker.clone(),
+        RuleEngine::new(),
         "127.0.0.1:0".parse().expect("addr"),
         Some("secret".to_owned()),
     )
@@ -534,7 +538,7 @@ async fn events_socket_should_require_a_token_and_push_a_snapshot_then_a_connect
 
 #[tokio::test]
 async fn options_should_advertise_cors_for_the_management_gui() {
-    let app = router(broker().await, None);
+    let app = router(broker().await, RuleEngine::new(), None);
     let response = app
         .oneshot(
             Request::builder()

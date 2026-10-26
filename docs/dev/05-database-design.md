@@ -1,6 +1,8 @@
 # 数据库设计
 
-> 状态: `heron_storage` 已用 SeaORM 创建并读写下列核心表。认证用户和 ACL 在 v0.3.0 由 YAML 配置，`users` 与 `acl_rules` 表仍未建。规则和统计表仍未建。
+> 状态: `heron_storage`（SeaORM + PostgreSQL）已在连接时创建并读写 `clients`、`sessions`、`subscriptions`、`retained_messages`、`messages`、`rules` 六张表（见 `crates/heron_storage/src/schema.rs`）。认证用户与 ACL 目前由 YAML 配置，`users`、`acl_rules` 及统计/分组类表尚未建库，属于规划。
+
+> 下文与实现不一致之处以 `schema.rs` 为准：`ip_address` 为 `VARCHAR(128)` 而非 `INET`（保持 SeaORM `String` 模型）；`messages.direction` 区分出站 inflight 与入站 QoS 2 握手；`rules.conditions` 为 `TEXT`（JSON 字符串）。
 
 ## 核心表
 
@@ -52,6 +54,9 @@ CREATE TABLE subscriptions (
     client_id VARCHAR(255) NOT NULL,
     topic VARCHAR(512) NOT NULL,
     qos SMALLINT NOT NULL,
+    no_local BOOLEAN NOT NULL DEFAULT FALSE,
+    retain_as_published BOOLEAN NOT NULL DEFAULT FALSE,
+    retain_handling SMALLINT NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (client_id) REFERENCES clients(client_id) ON DELETE CASCADE,
     UNIQUE(client_id, topic)
@@ -77,7 +82,7 @@ CREATE TABLE retained_messages (
 CREATE INDEX idx_retained_messages_topic ON retained_messages(topic);
 ```
 
-### messages (离线消息表)
+### messages (离线/inflight 消息表)
 
 ```sql
 CREATE TABLE messages (
@@ -90,10 +95,12 @@ CREATE TABLE messages (
     payload_size INTEGER,
     retain BOOLEAN DEFAULT false,
     dup BOOLEAN DEFAULT false,
-    state VARCHAR(20),  -- pending, puback, pubrec, pubrel, pubcomp
+    direction VARCHAR(8) NOT NULL DEFAULT 'out',  -- out = 出站 inflight, in = 入站 QoS 2 握手
+    state VARCHAR(20) NOT NULL,                   -- pending, puback, pubrec, pubrel, pubcomp
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (client_id) REFERENCES clients(client_id) ON DELETE CASCADE
+    FOREIGN KEY (client_id) REFERENCES clients(client_id) ON DELETE CASCADE,
+    UNIQUE(client_id, packet_id, direction)
 );
 
 CREATE INDEX idx_messages_client_id ON messages(client_id);
@@ -101,7 +108,7 @@ CREATE INDEX idx_messages_state ON messages(state);
 CREATE INDEX idx_messages_created_at ON messages(created_at);
 ```
 
-## 认证授权表
+## 认证授权表（规划，v0.3.0 起由 YAML 配置）
 
 ### users (用户表)
 
@@ -136,20 +143,20 @@ CREATE INDEX idx_acl_rules_client_id ON acl_rules(client_id);
 CREATE INDEX idx_acl_rules_topic ON acl_rules(topic);
 ```
 
-## 规则引擎表
+## 规则引擎表（已实现）
 
 ### rules (规则表)
 
 ```sql
 CREATE TABLE rules (
-    id BIGSERIAL PRIMARY KEY,
+    id BIGINT PRIMARY KEY,
     name VARCHAR(255) NOT NULL UNIQUE,
     description TEXT,
     enabled BOOLEAN DEFAULT true,
     priority INTEGER DEFAULT 0,
     topic_filter VARCHAR(512) NOT NULL,
-    conditions JSONB,
-    actions JSONB NOT NULL,
+    conditions TEXT,          -- JSON 条件字符串
+    actions TEXT NOT NULL,    -- JSON 动作数组
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -158,7 +165,7 @@ CREATE INDEX idx_rules_enabled ON rules(enabled);
 CREATE INDEX idx_rules_topic_filter ON rules(topic_filter);
 ```
 
-## 统计表
+## 统计表（规划，未建）
 
 ### client_stats (客户端统计)
 
@@ -198,7 +205,7 @@ CREATE INDEX idx_connection_history_client_id ON connection_history(client_id);
 CREATE INDEX idx_connection_history_connected_at ON connection_history(connected_at);
 ```
 
-## 客户端管理表
+## 客户端管理表（规划，未建）
 
 ### client_groups (分组表)
 

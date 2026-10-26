@@ -6,7 +6,8 @@ use bytes::Bytes;
 use chrono::{SecondsFormat, Utc};
 use heron_core::{
     BrokerHooks, ConnectEvent, DisconnectEvent, FilterClass, HookPublish, HookReject,
-    PublishDecision, PublishEvent, SubscribeEvent, UnsubscribeEvent, classify_filter,
+    PublishDecision, PublishEvent, Storage, SubscribeEvent, UnsubscribeEvent, WriteOp,
+    classify_filter,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -79,6 +80,7 @@ struct Inner {
     rules: Vec<Stored>,
     hooks: Vec<Arc<dyn Hook>>,
     http: reqwest::Client,
+    storage: Option<Arc<dyn Storage>>,
 }
 
 /// Cloneable rule store. Successful management responses report the engine as active.
@@ -100,7 +102,24 @@ impl RuleEngine {
                 rules: Vec::new(),
                 hooks: Vec::new(),
                 http,
+                storage: None,
             })),
+        }
+    }
+
+    /// Attach a durable store. Subsequent successful CRUD writes the rule through.
+    ///
+    /// Persistence failures are logged and never affect the in-memory result.
+    pub fn set_storage(&self, storage: Arc<dyn Storage>) {
+        lock(&self.inner).storage = Some(storage);
+    }
+
+    /// Highest rule id currently stored, so storage can be re-seeded without
+    /// generating duplicate identifiers.
+    pub fn next_id_after(&self, max_loaded_id: u64) {
+        let mut inner = lock(&self.inner);
+        if inner.next_id <= max_loaded_id {
+            inner.next_id = max_loaded_id.saturating_add(1);
         }
     }
 
@@ -133,68 +152,142 @@ impl RuleEngine {
         records
     }
 
-    /// Validate and store a rule.
-    pub fn insert(&self, input: RuleInput) -> Result<RuleRecord, RuleError> {
-        let mut inner = lock(&self.inner);
-        let draft = validate(&input, &inner.rules, None)?;
-        let id = inner.next_id;
-        inner.next_id = inner.next_id.saturating_add(1);
-        let now = timestamp();
-        let record = RuleRecord {
-            id,
-            name: draft.name,
-            description: draft.description,
-            enabled: draft.enabled,
-            priority: draft.priority,
-            topic_filter: draft.topic_filter,
-            conditions: draft.conditions,
-            actions: draft.actions,
-            created_at: now.clone(),
-            updated_at: now,
+    /// Rebuild rules from storage and keep the id counter ahead of loaded rows.
+    ///
+    /// Rows that no longer compile are skipped with a warning; the ids are never
+    /// reused, so a broken row cannot collide with a future insert.
+    pub async fn restore(&self, records: Vec<heron_core::StoredRule>) {
+        for record in records {
+            if let Some(assigned) = self.restore_one(record).await {
+                self.next_id_after(assigned.id);
+            }
+        }
+    }
+
+    async fn restore_one(&self, record: heron_core::StoredRule) -> Option<RuleRecord> {
+        let conditions = serde_json::from_str(&record.conditions).unwrap_or(Value::Null);
+        let actions = match serde_json::from_str(&record.actions) {
+            Ok(value) => value,
+            Err(err) => {
+                tracing::warn!(rule = record.id, error = %err, "规则动作无法解析，已跳过");
+                return None;
+            }
         };
+        let input = RuleInput {
+            name: record.name.clone(),
+            description: record.description.clone(),
+            enabled: record.enabled,
+            priority: record.priority,
+            topic_filter: record.topic_filter.clone(),
+            conditions,
+            actions,
+        };
+        let draft = match validate(&input, &self.list_validatable(), Some(record.id)) {
+            Ok(draft) => draft,
+            Err(err) => {
+                tracing::warn!(rule = record.id, error = %err, "规则无效，已跳过");
+                return None;
+            }
+        };
+        let restored = RuleRecord {
+            id: record.id,
+            name: record.name,
+            description: record.description,
+            enabled: record.enabled,
+            priority: record.priority,
+            topic_filter: record.topic_filter,
+            conditions: draft.conditions.clone(),
+            actions: draft.actions.clone(),
+            created_at: record.created_at,
+            updated_at: record.updated_at,
+        };
+        let mut inner = lock(&self.inner);
         inner.rules.push(Stored {
-            record: record.clone(),
+            record: restored.clone(),
             condition: draft.condition,
             actions: draft.compiled,
         });
+        inner.next_id = inner.next_id.max(restored.id.saturating_add(1));
+        Some(restored)
+    }
+
+    fn list_validatable(&self) -> Vec<Stored> {
+        lock(&self.inner).rules.clone()
+    }
+
+    /// Validate and store a rule.
+    pub fn insert(&self, input: RuleInput) -> Result<RuleRecord, RuleError> {
+        let record = {
+            let mut inner = lock(&self.inner);
+            let draft = validate(&input, &inner.rules, None)?;
+            let id = inner.next_id;
+            inner.next_id = inner.next_id.saturating_add(1);
+            let now = timestamp();
+            let record = RuleRecord {
+                id,
+                name: draft.name,
+                description: draft.description,
+                enabled: draft.enabled,
+                priority: draft.priority,
+                topic_filter: draft.topic_filter,
+                conditions: draft.conditions,
+                actions: draft.actions,
+                created_at: now.clone(),
+                updated_at: now,
+            };
+            inner.rules.push(Stored {
+                record: record.clone(),
+                condition: draft.condition,
+                actions: draft.compiled,
+            });
+            record
+        };
+        self.persist(WriteOp::UpsertRule(to_storage_rule(&record)));
         Ok(record)
     }
 
     /// Replace an existing rule, keeping its id and creation time.
     pub fn update(&self, id: u64, input: RuleInput) -> Result<RuleRecord, RuleError> {
-        let mut inner = lock(&self.inner);
-        let Some(index) = inner.rules.iter().position(|stored| stored.record.id == id) else {
-            return Err(RuleError::NotFound);
+        let record = {
+            let mut inner = lock(&self.inner);
+            let Some(index) = inner.rules.iter().position(|stored| stored.record.id == id) else {
+                return Err(RuleError::NotFound);
+            };
+            let draft = validate(&input, &inner.rules, Some(id))?;
+            let created_at = inner.rules[index].record.created_at.clone();
+            let record = RuleRecord {
+                id,
+                name: draft.name,
+                description: draft.description,
+                enabled: draft.enabled,
+                priority: draft.priority,
+                topic_filter: draft.topic_filter,
+                conditions: draft.conditions,
+                actions: draft.actions,
+                created_at,
+                updated_at: timestamp(),
+            };
+            inner.rules[index] = Stored {
+                record: record.clone(),
+                condition: draft.condition,
+                actions: draft.compiled,
+            };
+            record
         };
-        let draft = validate(&input, &inner.rules, Some(id))?;
-        let created_at = inner.rules[index].record.created_at.clone();
-        let record = RuleRecord {
-            id,
-            name: draft.name,
-            description: draft.description,
-            enabled: draft.enabled,
-            priority: draft.priority,
-            topic_filter: draft.topic_filter,
-            conditions: draft.conditions,
-            actions: draft.actions,
-            created_at,
-            updated_at: timestamp(),
-        };
-        inner.rules[index] = Stored {
-            record: record.clone(),
-            condition: draft.condition,
-            actions: draft.compiled,
-        };
+        self.persist(WriteOp::UpsertRule(to_storage_rule(&record)));
         Ok(record)
     }
 
     /// Remove a rule.
     pub fn delete(&self, id: u64) -> Result<(), RuleError> {
-        let mut inner = lock(&self.inner);
-        let Some(index) = inner.rules.iter().position(|stored| stored.record.id == id) else {
-            return Err(RuleError::NotFound);
-        };
-        inner.rules.remove(index);
+        {
+            let mut inner = lock(&self.inner);
+            let Some(index) = inner.rules.iter().position(|stored| stored.record.id == id) else {
+                return Err(RuleError::NotFound);
+            };
+            inner.rules.remove(index);
+        }
+        self.persist(WriteOp::DeleteRule(id));
         Ok(())
     }
 
@@ -264,6 +357,16 @@ impl RuleEngine {
             }
         }
         Ok(())
+    }
+
+    fn persist(&self, op: WriteOp) {
+        let storage = lock(&self.inner).storage.clone();
+        let Some(storage) = storage else { return };
+        tokio::spawn(async move {
+            if let Err(err) = storage.apply(&op).await {
+                tracing::warn!(error = %err, "规则持久化失败");
+            }
+        });
     }
 }
 
@@ -617,4 +720,19 @@ fn lock(inner: &Mutex<Inner>) -> std::sync::MutexGuard<'_, Inner> {
 
 fn timestamp() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)
+}
+
+fn to_storage_rule(record: &RuleRecord) -> heron_core::StoredRule {
+    heron_core::StoredRule {
+        id: record.id,
+        name: record.name.clone(),
+        description: record.description.clone(),
+        enabled: record.enabled,
+        priority: record.priority,
+        topic_filter: record.topic_filter.clone(),
+        conditions: record.conditions.to_string(),
+        actions: record.actions.to_string(),
+        created_at: record.created_at.clone(),
+        updated_at: record.updated_at.clone(),
+    }
 }

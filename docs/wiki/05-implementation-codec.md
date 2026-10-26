@@ -7,20 +7,27 @@
 ```
 mqtt_codec/
 ├── src/
-│   ├── lib.rs           # 公共 trait 定义
+│   ├── lib.rs           # Encoder / Decoder trait、MqttError
 │   ├── error.rs         # 错误类型定义
 │   ├── v4/              # MQTT v3.1.1 实现
 │   │   ├── mod.rs
-│   │   ├── packet.rs
-│   │   ├── codec.rs
+│   │   ├── packet.rs    # 报文类型与结构定义
+│   │   ├── codec.rs     # MqttCodec (实现 Encoder/Decoder)
 │   │   ├── decoder.rs
-│   │   └── encoder.rs
+│   │   ├── encoder.rs
+│   │   ├── builder.rs   # Builder 模式构造报文
+│   │   ├── return_codes.rs
+│   │   └── validation.rs # 协议 MUST 规则校验
 │   └── v5/              # MQTT v5.0 实现
 │       ├── mod.rs
 │       ├── packet.rs
 │       ├── codec.rs
 │       ├── decoder.rs
-│       └── encoder.rs
+│       ├── encoder.rs
+│       ├── builder.rs
+│       ├── properties_codec.rs # 属性编解码
+│       ├── property_id.rs      # 属性 ID 与类型
+│       └── validation.rs
 ```
 
 ## 核心 Trait
@@ -137,4 +144,4 @@ fn decode_variable_length(src: &mut BytesMut) -> Result<u32, Error> {
 cargo test -p mqtt_codec
 ```
 
-具体使用示例参考 `mqtt_codec/README.md` 和 `mqtt_codec/examples/`。
+具体使用示例参考 [crates/mqtt_codec/README.md](../../crates/mqtt_codec/README.md) 和 `mqtt_codec/examples/`。

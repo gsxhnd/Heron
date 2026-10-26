@@ -1,6 +1,6 @@
 # 路线图
 
-> 状态: v0.6.0 管理界面已落地。规则引擎仍不执行规则。10,000+ 连接、P99 < 50ms、覆盖率 > 80% 仍是质量目标，尚未压测。
+> 状态: v0.6.0 管理界面已落地。规则引擎已接入 Broker 生命周期钩子并支持持久化。10,000+ 连接、P99 < 50ms、覆盖率 > 80% 仍是质量目标，尚未压测。
 
 ## 版本规划
 
@@ -38,11 +38,17 @@
 
 ---
 
-### v0.5.0 - 规则引擎
+### v0.5.0 - 规则引擎 ✅
 
-**预计**: 3 周
+已落地: `heron_rules` 规则引擎已接入 Broker 生命周期钩子 (CONNECT / 断开 / PUBLISH / SUBSCRIBE / UNSUBSCRIBE)，独立于管理 API 安装——即使 `api.enabled: false`，规则也会执行。
 
-核心: 规则解析器、消息/内容路由、数据转换、条件触发、钩子插件、HTTP Webhook
+核心:
+- 规则解析器: `SELECT ... FROM "topic" WHERE ...` SQL 语法与结构化的 `all` / `any` 条件
+- 消息/内容路由: 按主题过滤器匹配，条件中可引用 `payload`、`client_id`、`username` 等字段
+- 动作: `log`、`drop`、`reject`、`republish`、`transform`、`webhook`（HTTP/HTTPS，reqwest）
+- 钩子插件: `Hook` trait 在内置规则之前执行
+- 规则持久化: 通过 `Storage`（SeaORM + PostgreSQL 或内存实现）写通（write-through），重启后恢复
+- 生命周期事件: `$events/client_connected`、`$events/client_disconnected`、`$events/client_subscribed`、`$events/client_unsubscribed`
 
 ---
 
@@ -54,7 +60,7 @@
 - 客户端：按 ID、在线状态、协议版本筛选，查看会话字段和订阅，断开连接
 - 主题：树形列表、保留消息查看，以及通过管理 API 发布或清除保留消息
 - 订阅列表
-- 规则配置：内存中的 CRUD。响应里的 `engine` 为 `inactive`，消息路由不会执行这些规则
+- 规则配置：通过管理 API 增删改查规则；规则经 `Storage` 持久化，重启后恢复，Broker 按规则执行消息路由
 - 系统设置：界面语言、主题、管理 API 地址和 token。Broker 的认证与日志仍由 YAML 和 `RUST_LOG` 控制
 - `GET /api/v1/events` WebSocket 每秒推送快照，并在基线之后推送连接和断开事件。浏览器使用 `?token=`
 
@@ -99,14 +105,14 @@
 2026 Q2          2026 Q3          2026 Q4          2027 Q1
    │                │                │                │
    ▼                ▼                ▼                ▼
-v0.2.0          v0.3.0          v0.5.0          v0.7.0
-单节点Broker     安全认证         规则引擎         Raft集群
+v0.2.0          v0.5.0          v0.7.0          v1.0.0
+单节点Broker     规则引擎         Raft集群         生产就绪
    │                │                │                │
-   └────────────────┴────────────────┴────────────────┘
-                            │
-                       v0.4.0 API
-                       v0.6.0 Web GUI
-                            │
-                            ▼
-                       v1.0.0 生产就绪
+   └────────────────┴────────────────┘                │
+                            │                        │
+                       v0.3.0 安全认证               │
+                       v0.4.0 API                   │
+                       v0.6.0 Web GUI               │
+                            │                       │
+                            └───────────────────────┘
 ```

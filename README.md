@@ -23,7 +23,8 @@ Heron 是一个使用 Rust 编写的 MQTT 项目，目标是逐步演进为完�
 - 已实现：用户名/密码、Token、客户端证书认证与 ACL；管理 REST API、健康检查和 Prometheus
 - 已实现：`mqtt_codec` 编解码，以及 `mqtt_client` 发布/订阅、TLS、自动重连
 - 已实现：`web/` 管理界面（React、Zustand、TanStack Router、shadcn/ui）
-- 规划中：规则引擎执行、Docker 与集群
+- 已实现：规则引擎（SQL 与条件表达式、republish/transform/webhook 等动作、生命周期钩子、Storage 持久化）
+- 规划中：Docker 与集群（Raft）
 
 ```bash
 cargo run -p heron
@@ -47,14 +48,14 @@ cargo run -p mqtt_client -- pub -t test/topic -m hello -q 1
 cargo run -p mqtt_client -- --protocol v5 sub -H 127.0.0.1 -t test/#
 ```
 
-更详细的说明见 [docs/dev/README.md](docs/dev/README.md) 与 [crates/mqtt_codec/README.md](crates/mqtt_codec/README.md)。
+更详细的说明见 [docs/wiki](docs/wiki/README.md)（使用与实现）与 [docs/dev](docs/dev/README.md)（计划与设计）。
 
 ## 文档入口
 
-- [开发文档索引](docs/dev/README.md)
-- [项目概述](docs/dev/01-project-overview.md)
+- [wiki 索引](docs/wiki/README.md) — 快速开始、MQTT 客户端、管理 API、Web GUI 与实现说明
+- [开发文档索引](docs/dev/README.md) — 需求、架构、路线图与设计规范
+- [快速开始](docs/wiki/01-quick-start.md)
 - [系统架构](docs/dev/03-architecture.md)
-- [快速开始](docs/dev/05-quick-start.md)
 
 ## 当前项目结构
 
@@ -68,7 +69,8 @@ Heron/
 │   ├── heron_storage/ # SeaORM + PostgreSQL
 │   └── heron/         # Broker 进程
 ├── conf/broker.yaml         # 示例配置
-├── docs/dev/                # 设计与开发文档
+├── docs/dev/                # 开发计划与设计文档
+├── docs/wiki/               # 使用与实现文档
 └── Cargo.toml               # workspace 配置
 ```
 

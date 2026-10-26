@@ -18,6 +18,7 @@ use heron_auth::{
 };
 use heron_core::{Broker, BrokerConfig, MemoryStorage, Storage};
 use heron_mqtt::{ClientCertMode, Server, TlsAcceptor, acceptor_from_pem};
+use heron_rules::RuleEngine;
 use heron_storage::PostgresStorage;
 use serde::Deserialize;
 use tracing_subscriber::EnvFilter;
@@ -215,7 +216,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let storage = open_storage(&file.storage).await?;
-    let broker = Broker::open(storage, BrokerConfig::default()).await?;
+    let broker = Broker::open(storage.clone(), BrokerConfig::default()).await?;
+    let engine = RuleEngine::new();
+    engine.set_storage(storage.clone());
+    let stored_rules = storage.load_rules().await?;
+    if !stored_rules.is_empty() {
+        engine.restore(stored_rules).await;
+        tracing::info!("规则引擎已从存储恢复规则");
+    }
+    broker.install_hooks(engine.hooks());
     if let Some(auth) = &file.auth {
         let security = build_security(auth)?;
         broker.install_security(security.authenticator, security.authorizer);
@@ -260,7 +269,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if token.is_none() {
             tracing::warn!("管理 API 未配置 bearer token，接口在本机以外也可匿名访问");
         }
-        let api = ApiServer::bind(broker, addr, token).await?;
+        let api = ApiServer::bind(broker.clone(), engine.clone(), addr, token).await?;
         let bound = api.local_addr()?;
         tracing::info!(%bound, "管理 API 已启动");
         Some(api)

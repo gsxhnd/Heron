@@ -869,6 +869,7 @@ dependencies = [
  "heron_auth",
  "heron_core",
  "heron_mqtt",
+ "heron_rules",
  "heron_storage",
  "serde",
  "serde_yaml",

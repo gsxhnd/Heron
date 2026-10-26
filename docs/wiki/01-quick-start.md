@@ -59,6 +59,7 @@ cargo run -p mqtt_client -- pub -H 127.0.0.1 -p 1883 -t test/topic -m hello -q 1
 
 ## 了解更多
 
-- `mqtt_codec/README.md` — Builder、Codec 和校验接口
-- `mqtt_codec/examples/` — 使用示例
-- [编解码实现](06-codec-implementation.md) — 模块架构与核心 Trait
+- [使用说明](README.md) — 本 wiki 索引
+- [MQTT 客户端](02-mqtt-client.md) — CLI 与库用法
+- [协议编解码实现](05-implementation-codec.md) — 模块架构与核心 Trait
+- [crates/mqtt_codec/README.md](../../crates/mqtt_codec/README.md)

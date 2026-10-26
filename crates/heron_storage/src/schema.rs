@@ -85,4 +85,20 @@ pub const SCHEMA: &[&str] = &[
     "#,
     "CREATE INDEX IF NOT EXISTS idx_messages_client_id ON messages(client_id)",
     "CREATE INDEX IF NOT EXISTS idx_messages_state ON messages(state)",
+    r#"
+    CREATE TABLE IF NOT EXISTS rules (
+        id BIGINT PRIMARY KEY,
+        name VARCHAR(255) NOT NULL UNIQUE,
+        description TEXT,
+        enabled BOOLEAN NOT NULL DEFAULT TRUE,
+        priority INTEGER NOT NULL DEFAULT 0,
+        topic_filter VARCHAR(512) NOT NULL,
+        conditions TEXT,
+        actions TEXT NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+    "#,
+    "CREATE INDEX IF NOT EXISTS idx_rules_enabled ON rules(enabled)",
+    "CREATE INDEX IF NOT EXISTS idx_rules_topic_filter ON rules(topic_filter)",
 ];

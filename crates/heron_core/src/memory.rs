@@ -7,7 +7,8 @@ use async_trait::async_trait;
 
 use crate::error::CoreError;
 use crate::storage::{
-    Direction, Storage, StoredClient, StoredMessage, StoredRetained, StoredSubscription, WriteOp,
+    Direction, Storage, StoredClient, StoredMessage, StoredRetained, StoredRule,
+    StoredSubscription, WriteOp,
 };
 
 #[derive(Default)]
@@ -16,6 +17,7 @@ struct MemoryInner {
     subscriptions: HashMap<(String, String), StoredSubscription>,
     retained: HashMap<String, StoredRetained>,
     messages: HashMap<(String, u16, Direction), StoredMessage>,
+    rules: HashMap<u64, StoredRule>,
 }
 
 /// In-memory storage. State survives for as long as this value is kept alive.
@@ -51,6 +53,10 @@ impl Storage for MemoryStorage {
 
     async fn load_messages(&self) -> Result<Vec<StoredMessage>, CoreError> {
         Ok(self.lock().messages.values().cloned().collect())
+    }
+
+    async fn load_rules(&self) -> Result<Vec<StoredRule>, CoreError> {
+        Ok(self.lock().rules.values().cloned().collect())
     }
 
     async fn apply(&self, op: &WriteOp) -> Result<(), CoreError> {
@@ -109,6 +115,12 @@ impl Storage for MemoryStorage {
             }
             WriteOp::ClearMessages(client_id) => {
                 guard.messages.retain(|(id, _, _), _| id != client_id);
+            }
+            WriteOp::UpsertRule(rule) => {
+                guard.rules.insert(rule.id, rule.clone());
+            }
+            WriteOp::DeleteRule(rule_id) => {
+                guard.rules.remove(rule_id);
             }
         }
         Ok(())
