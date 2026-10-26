@@ -1,6 +1,6 @@
 use bytes::BytesMut;
-use mqtt_codec::v4::*;
 use mqtt_codec::Encoder;
+use mqtt_codec::v4::*;
 
 fn main() {
     println!("=== MQTT v3.1.1 Encoding Examples ===\n");
@@ -102,10 +102,7 @@ fn main() {
     // 7. SUBACK packet
     let suback_packet = Packet::SubAck(SubAckPacket {
         packet_id: 1,
-        return_codes: vec![
-            SubAckReturnCode::SuccessQoS0,
-            SubAckReturnCode::SuccessQoS1,
-        ],
+        return_codes: vec![SubAckReturnCode::SuccessQoS0, SubAckReturnCode::SuccessQoS1],
     });
 
     buffer.clear();

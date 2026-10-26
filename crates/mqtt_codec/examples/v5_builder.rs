@@ -24,9 +24,18 @@ fn main() {
 
     println!("1. CONNECT with v5.0 properties");
     println!("   Client ID: {}", connect.client_id);
-    println!("   Session Expiry: {:?}s", connect.properties.session_expiry_interval);
-    println!("   Receive Maximum: {:?}", connect.properties.receive_maximum);
-    println!("   Auth Method: {:?}", connect.properties.authentication_method);
+    println!(
+        "   Session Expiry: {:?}s",
+        connect.properties.session_expiry_interval
+    );
+    println!(
+        "   Receive Maximum: {:?}",
+        connect.properties.receive_maximum
+    );
+    println!(
+        "   Auth Method: {:?}",
+        connect.properties.authentication_method
+    );
 
     // 2. PUBLISH with properties
     let publish = PublishPacketBuilder::new("sensor/data", Bytes::from(r#"{"temp": 23.5}"#))
@@ -44,24 +53,21 @@ fn main() {
     println!("   Topic: {}", publish.topic_name);
     println!("   Content Type: {:?}", publish.properties.content_type);
     println!("   Response Topic: {:?}", publish.properties.response_topic);
-    println!("   User Properties: {:?}", publish.properties.user_properties);
+    println!(
+        "   User Properties: {:?}",
+        publish.properties.user_properties
+    );
 
     // 3. SUBSCRIBE with subscription options
     let subscribe = SubscribePacketBuilder::new(1)
         .topic_with_options(
             "home/+/temperature",
             QoS::AtLeastOnce,
-            true,   // no_local
-            false,  // retain_as_published
-            0,      // retain_handling
+            true,  // no_local
+            false, // retain_as_published
+            0,     // retain_handling
         )
-        .topic_with_options(
-            "home/+/humidity",
-            QoS::AtMostOnce,
-            false,
-            true,
-            1,
-        )
+        .topic_with_options("home/+/humidity", QoS::AtMostOnce, false, true, 1)
         .build()
         .expect("SUBSCRIBE should have at least one topic");
 
@@ -101,7 +107,10 @@ fn main() {
 
     println!("\n5. DISCONNECT with reason code");
     println!("   Reason Code: {:?}", disconnect.reason_code);
-    println!("   Reason String: {:?}", disconnect.properties.reason_string);
+    println!(
+        "   Reason String: {:?}",
+        disconnect.properties.reason_string
+    );
 
     // 6. AUTH packet
     let auth = AuthPacket {
@@ -115,7 +124,10 @@ fn main() {
 
     println!("\n6. AUTH for re-authentication");
     println!("   Reason Code: {:?}", auth.reason_code);
-    println!("   Auth Method: {:?}", auth.properties.authentication_method);
+    println!(
+        "   Auth Method: {:?}",
+        auth.properties.authentication_method
+    );
 
     // 7. Round-trip encode/decode with properties
     println!("\n7. Round-trip encode/decode test");
@@ -127,16 +139,30 @@ fn main() {
         .build();
 
     let mut buffer = bytes::BytesMut::new();
-    codec.encode(Packet::Connect(original.clone()), &mut buffer).unwrap();
+    codec
+        .encode(Packet::Connect(original.clone()), &mut buffer)
+        .unwrap();
 
     if let Some(Packet::Connect(decoded)) = codec.decode(&mut buffer).unwrap() {
         assert_eq!(original.client_id, decoded.client_id);
-        assert_eq!(original.properties.session_expiry_interval, decoded.properties.session_expiry_interval);
-        assert_eq!(original.properties.receive_maximum, decoded.properties.receive_maximum);
+        assert_eq!(
+            original.properties.session_expiry_interval,
+            decoded.properties.session_expiry_interval
+        );
+        assert_eq!(
+            original.properties.receive_maximum,
+            decoded.properties.receive_maximum
+        );
         println!("   Round-trip successful!");
         println!("   Client ID: {}", decoded.client_id);
-        println!("   Session Expiry: {:?}s", decoded.properties.session_expiry_interval);
-        println!("   Receive Maximum: {:?}", decoded.properties.receive_maximum);
+        println!(
+            "   Session Expiry: {:?}s",
+            decoded.properties.session_expiry_interval
+        );
+        println!(
+            "   Receive Maximum: {:?}",
+            decoded.properties.receive_maximum
+        );
     }
 
     println!("\n=== v5.0 Builder pattern examples completed ===");

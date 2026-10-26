@@ -85,14 +85,8 @@ fn test_sub_ack_return_code_qos() {
     use mqtt_codec::v4::QoS;
 
     assert_eq!(SubAckReturnCode::SuccessQoS0.qos(), Some(QoS::AtMostOnce));
-    assert_eq!(
-        SubAckReturnCode::SuccessQoS1.qos(),
-        Some(QoS::AtLeastOnce)
-    );
-    assert_eq!(
-        SubAckReturnCode::SuccessQoS2.qos(),
-        Some(QoS::ExactlyOnce)
-    );
+    assert_eq!(SubAckReturnCode::SuccessQoS1.qos(), Some(QoS::AtLeastOnce));
+    assert_eq!(SubAckReturnCode::SuccessQoS2.qos(), Some(QoS::ExactlyOnce));
     assert_eq!(SubAckReturnCode::Failure.qos(), None);
 }
 

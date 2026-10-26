@@ -205,4 +205,3 @@ impl fmt::Display for SubAckReturnCode {
         write!(f, "{}", self.description())
     }
 }
-

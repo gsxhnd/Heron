@@ -6,8 +6,8 @@
 use bytes::Bytes;
 
 use super::packet::{
-    ConnectPacket, Properties, PublishPacket, QoS, SubscribePacket,
-    SubscriptionOption, UnsubscribePacket,
+    ConnectPacket, Properties, PublishPacket, QoS, SubscribePacket, SubscriptionOption,
+    UnsubscribePacket,
 };
 
 /// Builder for creating [`ConnectPacket`] instances for MQTT v5.0.
@@ -218,7 +218,9 @@ impl ConnectPacketBuilder {
     /// * `key` - The key string.
     /// * `value` - The value string.
     pub fn user_property(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.properties.user_properties.push((key.into(), value.into()));
+        self.properties
+            .user_properties
+            .push((key.into(), value.into()));
         self
     }
 
@@ -411,7 +413,9 @@ impl PublishPacketBuilder {
     /// * `key` - The key string.
     /// * `value` - The value string.
     pub fn user_property(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.properties.user_properties.push((key.into(), value.into()));
+        self.properties
+            .user_properties
+            .push((key.into(), value.into()));
         self
     }
 
@@ -435,7 +439,10 @@ impl PublishPacketBuilder {
 
 impl PublishPacket {
     /// Returns a new [`PublishPacketBuilder`] for creating PUBLISH packets.
-    pub fn builder(topic_name: impl Into<String>, payload: impl Into<Bytes>) -> PublishPacketBuilder {
+    pub fn builder(
+        topic_name: impl Into<String>,
+        payload: impl Into<Bytes>,
+    ) -> PublishPacketBuilder {
         PublishPacketBuilder::new(topic_name, payload)
     }
 }
@@ -537,7 +544,9 @@ impl SubscribePacketBuilder {
     /// * `key` - The key string.
     /// * `value` - The value string.
     pub fn user_property(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.properties.user_properties.push((key.into(), value.into()));
+        self.properties
+            .user_properties
+            .push((key.into(), value.into()));
         self
     }
 
@@ -617,7 +626,9 @@ impl UnsubscribePacketBuilder {
     /// * `key` - The key string.
     /// * `value` - The value string.
     pub fn user_property(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.properties.user_properties.push((key.into(), value.into()));
+        self.properties
+            .user_properties
+            .push((key.into(), value.into()));
         self
     }
 
@@ -645,4 +656,3 @@ impl UnsubscribePacket {
         UnsubscribePacketBuilder::new(packet_id)
     }
 }
-

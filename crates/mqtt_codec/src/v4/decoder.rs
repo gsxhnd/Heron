@@ -3,14 +3,14 @@
 //! This module provides decoding functionality for MQTT v3.1.1 packets,
 //! handling the conversion from raw bytes into structured `Packet` variants.
 
+use crate::Decoder;
+use crate::MqttError;
 use crate::v4::packet::*;
 use crate::v4::return_codes::{ConnectReturnCode, SubAckReturnCode};
 use crate::v4::validation::{
     validate_connack_packet, validate_connect_packet, validate_fixed_header_flags, validate_packet,
     validate_packet_id, validate_topic_filter, validate_topic_name,
 };
-use crate::Decoder;
-use crate::MqttError;
 use bytes::{Buf, Bytes, BytesMut};
 
 /// Constants for MQTT protocol.

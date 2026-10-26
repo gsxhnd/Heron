@@ -3,8 +3,8 @@
 //! This module provides validation functions that ensure MQTT packets
 //! conform to the MQTT v3.1.1 specification requirements.
 
-use crate::error::{MqttError, ClientIdErrorReason, TopicErrorReason, TopicFilterErrorReason};
 use super::packet::{ConnectPacket, QoS};
+use crate::error::{ClientIdErrorReason, MqttError, TopicErrorReason, TopicFilterErrorReason};
 
 // ============================================================================
 // Constants
@@ -69,7 +69,10 @@ pub fn validate_connect_packet(packet: &ConnectPacket) -> Result<(), MqttError> 
 pub fn validate_protocol_name(name: &str) -> Result<(), MqttError> {
     if name != PROTOCOL_NAME_MQTT {
         return Err(MqttError::protocol_violation(
-            format!("Invalid protocol name: expected '{}', got '{}'", PROTOCOL_NAME_MQTT, name),
+            format!(
+                "Invalid protocol name: expected '{}', got '{}'",
+                PROTOCOL_NAME_MQTT, name
+            ),
             Some(1), // CONNECT packet type
         ));
     }
@@ -90,7 +93,10 @@ pub fn validate_protocol_name(name: &str) -> Result<(), MqttError> {
 pub fn validate_protocol_level(level: u8) -> Result<(), MqttError> {
     if level != PROTOCOL_LEVEL_V4 {
         return Err(MqttError::protocol_violation(
-            format!("Invalid protocol level: expected {}, got {}", PROTOCOL_LEVEL_V4, level),
+            format!(
+                "Invalid protocol level: expected {}, got {}",
+                PROTOCOL_LEVEL_V4, level
+            ),
             Some(1),
         ));
     }
@@ -284,22 +290,34 @@ pub fn validate_credentials_flags(packet: &ConnectPacket) -> Result<(), MqttErro
 pub fn validate_topic_name(topic: &str) -> Result<(), MqttError> {
     // Check empty
     if topic.is_empty() {
-        return Err(MqttError::invalid_topic_name(topic, TopicErrorReason::Empty));
+        return Err(MqttError::invalid_topic_name(
+            topic,
+            TopicErrorReason::Empty,
+        ));
     }
 
     // Check length
     if topic.len() > MAX_TOPIC_LENGTH {
-        return Err(MqttError::invalid_topic_name(topic, TopicErrorReason::TooLong));
+        return Err(MqttError::invalid_topic_name(
+            topic,
+            TopicErrorReason::TooLong,
+        ));
     }
 
     // Check for null character
     if topic.contains('\0') {
-        return Err(MqttError::invalid_topic_name(topic, TopicErrorReason::ContainsNull));
+        return Err(MqttError::invalid_topic_name(
+            topic,
+            TopicErrorReason::ContainsNull,
+        ));
     }
 
     // Check for wildcards (not allowed in topic names for PUBLISH)
     if topic.contains('+') || topic.contains('#') {
-        return Err(MqttError::invalid_topic_name(topic, TopicErrorReason::ContainsWildcard));
+        return Err(MqttError::invalid_topic_name(
+            topic,
+            TopicErrorReason::ContainsWildcard,
+        ));
     }
 
     Ok(())
@@ -612,7 +630,10 @@ pub fn validate_packet_id(packet_id: u16) -> Result<(), MqttError> {
 // ============================================================================
 
 /// Validates QoS level and packet identifier consistency.
-pub fn validate_qos_packet_id(qos: super::packet::QoS, packet_id: Option<u16>) -> Result<(), MqttError> {
+pub fn validate_qos_packet_id(
+    qos: super::packet::QoS,
+    packet_id: Option<u16>,
+) -> Result<(), MqttError> {
     match qos {
         super::packet::QoS::AtMostOnce => {
             if packet_id.is_some() {
@@ -622,17 +643,15 @@ pub fn validate_qos_packet_id(qos: super::packet::QoS, packet_id: Option<u16>) -
                 ));
             }
         }
-        super::packet::QoS::AtLeastOnce | super::packet::QoS::ExactlyOnce => {
-            match packet_id {
-                Some(id) => validate_packet_id(id)?,
-                None => {
-                    return Err(MqttError::protocol_violation(
-                        "Packet identifier is required for QoS 1 and QoS 2",
-                        None,
-                    ));
-                }
+        super::packet::QoS::AtLeastOnce | super::packet::QoS::ExactlyOnce => match packet_id {
+            Some(id) => validate_packet_id(id)?,
+            None => {
+                return Err(MqttError::protocol_violation(
+                    "Packet identifier is required for QoS 1 and QoS 2",
+                    None,
+                ));
             }
-        }
+        },
     }
     Ok(())
 }

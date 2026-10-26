@@ -3,13 +3,13 @@
 //! This module provides a combined codec for MQTT v5.0 packets,
 //! suitable for use with asynchronous I/O frameworks like `tokio-util`.
 
-use bytes::BytesMut;
 use crate::{Decoder, Encoder};
+use bytes::BytesMut;
 
 use super::decoder::MqttDecoder;
 use super::encoder::MqttEncoder;
-use crate::v5::packet::Packet;
 use crate::MqttError;
+use crate::v5::packet::Packet;
 
 // ============================================================================
 // Codec

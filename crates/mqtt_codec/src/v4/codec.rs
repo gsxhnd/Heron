@@ -8,8 +8,8 @@ use bytes::BytesMut;
 
 use super::decoder::MqttDecoder;
 use super::encoder::MqttEncoder;
-use crate::v4::packet::Packet;
 use crate::MqttError;
+use crate::v4::packet::Packet;
 
 // ============================================================================
 // Codec

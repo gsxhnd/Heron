@@ -12,6 +12,7 @@ exclude.workspace = true
 
 [dependencies]
 heron_core = { path = "../heron_core" }
+heron_rules = { path = "../heron_rules" }
 axum = { version = "0.8", features = ["ws"] }
 bytes = { workspace = true }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

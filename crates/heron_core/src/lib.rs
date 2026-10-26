@@ -9,6 +9,7 @@
 
 mod broker;
 mod error;
+mod hooks;
 mod memory;
 mod message;
 mod qos;
@@ -21,6 +22,10 @@ pub use broker::{
 };
 pub use error::{
     ClientFlow, ConnectError, CoreError, PublishError, SubscribeAck, SubscribeFailure,
+};
+pub use hooks::{
+    BrokerHooks, ConnectEvent, DisconnectEvent, HookPublish, HookReject, NoopHooks,
+    PublishDecision, PublishEvent, SubscribeEvent, UnsubscribeEvent,
 };
 pub use memory::MemoryStorage;
 pub use message::{

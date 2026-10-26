@@ -11,7 +11,6 @@ mod rules;
 
 use std::future::Future;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
 
 use axum::Json;
 use axum::Router;
@@ -23,6 +22,7 @@ use axum::routing::{get, put};
 use bytes::Bytes;
 use chrono::{DateTime, SecondsFormat};
 use heron_core::{Broker, ClientSnapshot, IncomingPublish, PublishError, QoS};
+use heron_rules::RuleEngine;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -67,10 +67,12 @@ impl ApiServer {
 
 /// Router used by [`ApiServer`] and tests.
 pub fn router(broker: Broker, token: Option<String>) -> Router {
+    let rules = rules::engine();
+    broker.install_hooks(rules.hooks());
     let state = AppState {
         broker,
         token,
-        rules: Arc::new(Mutex::new(rules::RuleStore::new())),
+        rules,
     };
     let protected = Router::new()
         .route("/metrics", get(metrics))
@@ -111,7 +113,7 @@ pub fn router(broker: Broker, token: Option<String>) -> Router {
 pub(crate) struct AppState {
     pub(crate) broker: Broker,
     pub(crate) token: Option<String>,
-    pub(crate) rules: Arc<Mutex<rules::RuleStore>>,
+    pub(crate) rules: RuleEngine,
 }
 
 #[derive(Debug, Deserialize)]

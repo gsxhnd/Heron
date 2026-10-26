@@ -3,11 +3,11 @@
 //! This module provides decoding functionality for MQTT v5.0 packets,
 //! handling the conversion from raw bytes into structured `Packet` variants.
 
+use crate::Decoder;
+use crate::MqttError;
 use crate::v5::packet::*;
 use crate::v5::properties_codec::parse_required_properties;
 use crate::v5::validation::{validate_fixed_header_flags, validate_packet};
-use crate::Decoder;
-use crate::MqttError;
 use bytes::{Buf, Bytes, BytesMut};
 
 /// Constants for MQTT 5.0 protocol.

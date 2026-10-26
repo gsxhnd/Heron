@@ -3,10 +3,10 @@
 //! This module provides encoding functionality for MQTT v5.0 packets,
 //! converting structured `Packet` variants into raw byte streams.
 
-use crate::v5::packet::*;
-use crate::v5::validation::validate_packet;
 use crate::Encoder;
 use crate::MqttError;
+use crate::v5::packet::*;
+use crate::v5::validation::validate_packet;
 use bytes::{BufMut, BytesMut};
 
 /// Constants for MQTT 5.0 protocol.

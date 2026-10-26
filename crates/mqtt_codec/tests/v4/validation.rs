@@ -1,7 +1,7 @@
 use mqtt_codec::v4::{
-    validate_client_id, validate_credentials_flags, validate_packet_id, validate_protocol_level,
-    validate_protocol_name, validate_qos_packet_id, validate_topic_filter, validate_topic_name,
-    validate_will_message, ConnectPacket, QoS,
+    ConnectPacket, QoS, validate_client_id, validate_credentials_flags, validate_packet_id,
+    validate_protocol_level, validate_protocol_name, validate_qos_packet_id, validate_topic_filter,
+    validate_topic_name, validate_will_message,
 };
 
 #[test]

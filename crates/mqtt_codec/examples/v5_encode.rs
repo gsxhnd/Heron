@@ -1,6 +1,6 @@
 use bytes::BytesMut;
-use mqtt_codec::v5::*;
 use mqtt_codec::Encoder;
+use mqtt_codec::v5::*;
 
 fn main() {
     // Create a MQTT 5.0 Connect packet

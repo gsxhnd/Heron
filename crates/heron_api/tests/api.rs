@@ -7,7 +7,10 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use futures_util::StreamExt;
 use heron_api::{ApiServer, router};
-use heron_core::{Broker, BrokerConfig, ConnectRequest, MemoryStorage, ProtocolVersion};
+use heron_core::{
+    Broker, BrokerConfig, ConnectRequest, IncomingPublish, MemoryStorage, Outbound, PollEvent,
+    ProtocolVersion, QoS, SubOpts, SubscribeAck, SubscribeFilter,
+};
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use tokio_tungstenite::connect_async;
@@ -308,7 +311,7 @@ async fn topic_detail_should_return_retained_text_and_clear_when_an_empty_retain
 }
 
 #[tokio::test]
-async fn rules_should_round_trip_in_memory_and_report_that_the_engine_is_inactive() {
+async fn rules_should_round_trip_in_memory_and_report_that_the_engine_is_active() {
     let app = router(broker().await, Some("secret".to_owned()));
     let denied = app
         .clone()
@@ -339,7 +342,7 @@ async fn rules_should_round_trip_in_memory_and_report_that_the_engine_is_inactiv
         .expect("created");
     assert_eq!(created.status(), StatusCode::OK);
     let created = body_json(created).await;
-    assert_eq!(created["engine"], "inactive");
+    assert_eq!(created["engine"], "active");
     assert_eq!(created["data"]["name"], "forward");
     let id = created["data"]["id"].as_u64().expect("id");
 
@@ -369,7 +372,7 @@ async fn rules_should_round_trip_in_memory_and_report_that_the_engine_is_inactiv
                 .header("authorization", "Bearer secret")
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"name":"forward","enabled":false,"priority":5,"topic_filter":"sensors/#","conditions":{"gt":1},"actions":[{"type":"log"}]}"#,
+                    r#"{"name":"forward","enabled":false,"priority":5,"topic_filter":"sensors/#","conditions":{"sql":"qos >= 0"},"actions":[{"type":"log"}]}"#,
                 ))
                 .expect("request"),
         )
@@ -391,7 +394,7 @@ async fn rules_should_round_trip_in_memory_and_report_that_the_engine_is_inactiv
         .expect("listed");
     let listed = body_json(listed).await;
     assert_eq!(listed["data"][0]["priority"], 5);
-    assert_eq!(listed["engine"], "inactive");
+    assert_eq!(listed["engine"], "active");
 
     let deleted = app
         .oneshot(
@@ -406,6 +409,84 @@ async fn rules_should_round_trip_in_memory_and_report_that_the_engine_is_inactiv
         .expect("deleted");
     assert_eq!(deleted.status(), StatusCode::OK);
     assert_eq!(body_json(deleted).await["data"]["deleted"], true);
+}
+
+#[tokio::test]
+async fn rules_should_republish_a_matching_publish_to_subscribers() {
+    let broker = broker().await;
+    let app = router(broker.clone(), None);
+    let created = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/rules")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"name":"hot","topic_filter":"sensors/#","conditions":{"sql":"payload.temp > 30"},"actions":[{"type":"republish","topic":"alerts/${client_id}","qos":0}]}"#,
+                ))
+                .expect("request"),
+        )
+        .await
+        .expect("created");
+    assert_eq!(created.status(), StatusCode::OK);
+
+    let publisher = broker.connect(connect("pub")).await.expect("publisher");
+    let subscriber = broker.connect(connect("sub")).await.expect("subscriber");
+    let acks = broker
+        .subscribe(
+            &subscriber.client_id,
+            subscriber.epoch,
+            &[SubscribeFilter {
+                filter: "alerts/pub".to_owned(),
+                opts: SubOpts::v4(QoS::AtMostOnce),
+            }],
+        )
+        .await
+        .expect("subscribe");
+    assert_eq!(acks, vec![SubscribeAck::Granted(QoS::AtMostOnce)]);
+
+    publish_text(&broker, &publisher, "sensors/lab", r#"{"temp":20}"#).await;
+    let cold = broker
+        .poll(&subscriber.client_id, subscriber.epoch, 8)
+        .await;
+    assert!(
+        cold.is_empty(),
+        "temperature below the threshold is not forwarded"
+    );
+
+    publish_text(&broker, &publisher, "sensors/lab", r#"{"temp":31}"#).await;
+    let hot = broker
+        .poll(&subscriber.client_id, subscriber.epoch, 8)
+        .await;
+    match hot.first() {
+        Some(PollEvent::Outbound(Outbound::Publish { topic, payload, .. })) => {
+            assert_eq!(topic, "alerts/pub");
+            assert_eq!(payload.as_ref(), br#"{"temp":31}"#);
+        }
+        other => panic!("expected republished payload, got {other:?}"),
+    }
+}
+
+async fn publish_text(
+    broker: &Broker,
+    session: &heron_core::ConnectedSession,
+    topic: &str,
+    payload: &str,
+) {
+    broker
+        .publish(
+            &session.client_id,
+            session.epoch,
+            IncomingPublish {
+                topic: topic.to_owned(),
+                payload: bytes::Bytes::from(payload.to_owned()),
+                qos: QoS::AtMostOnce,
+                retain: false,
+                packet_id: None,
+            },
+        )
+        .await
+        .expect("publish");
 }
 
 #[tokio::test]

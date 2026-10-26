@@ -1,9 +1,9 @@
 use mqtt_codec::v5::{
+    AuthPacket, ConnectPacket, PacketType, Properties, PublishPacket, QoS, ReasonCode,
     parse_shared_subscription, validate_auth_packet, validate_credentials_flags,
     validate_fixed_header_flags, validate_property_scope, validate_property_values,
     validate_protocol_level, validate_protocol_name, validate_publish_packet,
-    validate_qos_packet_id, validate_reason_code_for_packet, validate_topic_filter, AuthPacket,
-    ConnectPacket, PacketType, Properties, PublishPacket, QoS, ReasonCode,
+    validate_qos_packet_id, validate_reason_code_for_packet, validate_topic_filter,
 };
 
 #[test]
@@ -29,9 +29,7 @@ fn test_validate_protocol_level_invalid() {
 #[test]
 fn test_validate_reason_code_connack() {
     assert!(validate_reason_code_for_packet(ReasonCode::Success, PacketType::ConnAck).is_ok());
-    assert!(
-        validate_reason_code_for_packet(ReasonCode::GrantedQoS1, PacketType::ConnAck).is_err()
-    );
+    assert!(validate_reason_code_for_packet(ReasonCode::GrantedQoS1, PacketType::ConnAck).is_err());
 }
 
 #[test]

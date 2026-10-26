@@ -12,6 +12,10 @@ use tokio::sync::Notify;
 use crate::error::{
     ClientFlow, ConnectError, CoreError, PublishError, SubscribeAck, SubscribeFailure,
 };
+use crate::hooks::{
+    BrokerHooks, ConnectEvent, DisconnectEvent, HookPublish, NoopHooks, PublishEvent,
+    SubscribeEvent, UnsubscribeEvent,
+};
 use crate::message::{
     AppMessage, ClientAck, ConnectRequest, ConnectedSession, DisconnectRequest, IncomingPublish,
     Outbound, PollEvent, ProtocolVersion, SubOpts, SubscribeFilter, Will,
@@ -55,6 +59,7 @@ struct Inner {
     storage: Arc<dyn Storage>,
     config: BrokerConfig,
     security: RwLock<Security>,
+    hooks: RwLock<Arc<dyn BrokerHooks>>,
     started: Instant,
     messages_received: AtomicU64,
     messages_sent: AtomicU64,
@@ -350,6 +355,7 @@ impl Broker {
                 storage,
                 config,
                 security: RwLock::new(Security::allow_all()),
+                hooks: RwLock::new(Arc::new(NoopHooks)),
                 started: Instant::now(),
                 messages_received: AtomicU64::new(0),
                 messages_sent,
@@ -381,6 +387,82 @@ impl Broker {
             authenticator,
             authorizer,
         };
+    }
+
+    /// Replace lifecycle hooks. The default forwards every publication.
+    pub fn install_hooks(&self, hooks: Arc<dyn BrokerHooks>) {
+        let mut guard = match self.inner.hooks.write() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        *guard = hooks;
+    }
+
+    fn hooks(&self) -> Arc<dyn BrokerHooks> {
+        match self.inner.hooks.read() {
+            Ok(guard) => Arc::clone(&guard),
+            Err(poisoned) => Arc::clone(&poisoned.into_inner()),
+        }
+    }
+
+    /// Run publish hooks, then fan out. Republished messages do not re-enter hooks.
+    async fn deliver(
+        &self,
+        publisher: &str,
+        username: Option<&str>,
+        publish: &IncomingPublish,
+    ) -> Vec<WriteOp> {
+        let decision = self
+            .hooks()
+            .on_publish(PublishEvent {
+                client_id: publisher.to_owned(),
+                username: username.map(str::to_owned),
+                topic: publish.topic.clone(),
+                payload: publish.payload.clone(),
+                qos: publish.qos.as_u8(),
+                retain: publish.retain,
+            })
+            .await;
+        let mut ops = Vec::new();
+        let mut state = self.lock();
+        if decision.forward {
+            let mut forwarded = publish.clone();
+            if let Some(payload) = decision.payload {
+                forwarded.payload = payload;
+            }
+            route(
+                &mut state,
+                &self.inner.config,
+                publisher,
+                &forwarded,
+                &mut ops,
+                &self.inner.messages_sent,
+            );
+        }
+        route_extras(
+            &mut state,
+            &self.inner.config,
+            decision.republish,
+            &mut ops,
+            &self.inner.messages_sent,
+        );
+        ops
+    }
+
+    async fn route_extra(&self, publishes: Vec<HookPublish>) -> Vec<WriteOp> {
+        if publishes.is_empty() {
+            return Vec::new();
+        }
+        let mut ops = Vec::new();
+        let mut state = self.lock();
+        route_extras(
+            &mut state,
+            &self.inner.config,
+            publishes,
+            &mut ops,
+            &self.inner.messages_sent,
+        );
+        ops
     }
 
     /// Connected and persistent sessions, sorted by client id.
@@ -504,18 +586,7 @@ impl Broker {
             return Err(PublishError::InvalidTopic);
         }
         self.inner.messages_received.fetch_add(1, Ordering::Relaxed);
-        let mut ops = Vec::new();
-        {
-            let mut state = self.lock();
-            route(
-                &mut state,
-                &self.inner.config,
-                "$heron",
-                &publish,
-                &mut ops,
-                &self.inner.messages_sent,
-            );
-        }
+        let ops = self.deliver("$heron", None, &publish).await;
         if let Err(err) = self.persist(ops).await {
             tracing::warn!(error = %err, "持久化管理端发布失败");
         }
@@ -620,8 +691,23 @@ impl Broker {
             .await?;
         }
         let username = identity.username;
+        let connect_extras = match self
+            .hooks()
+            .on_connect(ConnectEvent {
+                client_id: client_id.clone(),
+                username: username.clone(),
+                peer: request.peer.clone(),
+            })
+            .await
+        {
+            Ok(extras) => extras,
+            Err(reject) => {
+                tracing::info!(client_id, reason = %reject.reason, "钩子拒绝连接");
+                return Err(ConnectError::NotAuthorized);
+            }
+        };
 
-        let (connected, ops) = {
+        let (connected, mut ops, wills) = {
             let mut state = self.lock();
             let mut ops = Vec::new();
             let mut immediate_wills = Vec::new();
@@ -635,7 +721,7 @@ impl Broker {
                     if let Some(will) = session.will.take()
                         && will.delay_secs == 0
                     {
-                        immediate_wills.push(will);
+                        immediate_wills.push((session.username.clone(), will));
                     }
                 }
                 session.pending_will = None;
@@ -670,20 +756,16 @@ impl Broker {
                 notify: Arc::clone(&session.notify),
             };
             ops.push(WriteOp::UpsertClient(stored_client(session)));
-
-            for will in immediate_wills {
-                let publish = incoming_from_will(&will);
-                route(
-                    &mut state,
-                    &self.inner.config,
-                    &client_id,
-                    &publish,
-                    &mut ops,
-                    &self.inner.messages_sent,
-                );
-            }
-            (connected, ops)
+            (connected, ops, immediate_wills)
         };
+        for (will_user, will) in wills {
+            let publish = incoming_from_will(&will);
+            ops.extend(
+                self.deliver(&connected.client_id, will_user.as_deref(), &publish)
+                    .await,
+            );
+        }
+        ops.extend(self.route_extra(connect_extras).await);
         self.persist(ops).await.map_err(ConnectError::from)?;
         Ok(connected)
     }
@@ -723,6 +805,24 @@ impl Broker {
                 Err(AuthError::NotAuthorized | AuthError::BadCredentials) => allowed.push(false),
             }
         }
+        let hooks = self.hooks();
+        let mut subscribe_extras = Vec::new();
+        for (filter, flag) in filters.iter().zip(allowed.iter_mut()) {
+            if !*flag {
+                continue;
+            }
+            match hooks
+                .on_subscribe(SubscribeEvent {
+                    client_id: client_id.to_owned(),
+                    username: username.clone(),
+                    filter: filter.filter.clone(),
+                })
+                .await
+            {
+                Ok(extras) => subscribe_extras.extend(extras),
+                Err(_) => *flag = false,
+            }
+        }
         let (acks, ops) = {
             let mut state = self.lock();
             let mut ops = Vec::new();
@@ -746,6 +846,8 @@ impl Broker {
             }
             (acks, ops)
         };
+        let (acks, mut ops) = (acks, ops);
+        ops.extend(self.route_extra(subscribe_extras).await);
         self.persist(ops).await?;
         Ok(acks)
     }
@@ -757,11 +859,15 @@ impl Broker {
         epoch: u64,
         filters: &[String],
     ) -> Result<Vec<bool>, CoreError> {
-        let (removed, ops) = {
+        let (removed, ops, username) = {
             let mut state = self.lock();
             if !owns_session(state.sessions.get(client_id), epoch) {
                 return Err(CoreError::SessionNotFound);
             }
+            let username = state
+                .sessions
+                .get(client_id)
+                .and_then(|session| session.username.clone());
             let mut ops = Vec::new();
             let mut removed = Vec::with_capacity(filters.len());
             for filter in filters {
@@ -778,9 +884,28 @@ impl Broker {
                 }
                 removed.push(existed);
             }
-            (removed, ops)
+            (removed, ops, username)
         };
         self.persist(ops).await?;
+        let hooks = self.hooks();
+        let mut extras = Vec::new();
+        for (filter, existed) in filters.iter().zip(&removed) {
+            if *existed {
+                extras.extend(
+                    hooks
+                        .on_unsubscribe(UnsubscribeEvent {
+                            client_id: client_id.to_owned(),
+                            username: username.clone(),
+                            filter: filter.clone(),
+                        })
+                        .await,
+                );
+            }
+        }
+        let extra_ops = self.route_extra(extras).await;
+        if let Err(err) = self.persist(extra_ops).await {
+            tracing::warn!(error = %err, "持久化退订规则转发失败");
+        }
         Ok(removed)
     }
 
@@ -816,6 +941,7 @@ impl Broker {
         let username = gate.1;
         self.publish_allowed(client_id, username.as_deref(), &publish.topic)
             .await?;
+        let mut deliver_now = false;
         let ops = {
             let receive_limit = usize::from(self.inner.config.receive_maximum.max(1));
             let mut state = self.lock();
@@ -845,8 +971,8 @@ impl Broker {
                 let stored = StoredMessage {
                     client_id: client_id.to_owned(),
                     packet_id,
-                    topic: publish.topic,
-                    payload: publish.payload,
+                    topic: publish.topic.clone(),
+                    payload: publish.payload.clone(),
                     qos: publish.qos,
                     retain: publish.retain,
                     direction: Direction::In,
@@ -857,19 +983,16 @@ impl Broker {
                 state
                     .topics
                     .set_retained(&publish.topic, Bytes::new(), publish.qos);
-                vec![WriteOp::DeleteRetained(publish.topic)]
+                vec![WriteOp::DeleteRetained(publish.topic.clone())]
             } else {
-                let mut ops = Vec::new();
-                route(
-                    &mut state,
-                    &self.inner.config,
-                    client_id,
-                    &publish,
-                    &mut ops,
-                    &self.inner.messages_sent,
-                );
-                ops
+                deliver_now = true;
+                Vec::new()
             }
+        };
+        let ops = if deliver_now {
+            self.deliver(client_id, username.as_deref(), &publish).await
+        } else {
+            ops
         };
         if let Err(err) = self.persist(ops).await {
             tracing::warn!(error = %err, "持久化入站发布失败");
@@ -925,36 +1048,36 @@ impl Broker {
                 .await;
             return Err(err);
         }
-        let ops = {
+        let prepared = {
             let mut state = self.lock();
             let message = match state.sessions.get_mut(client_id) {
                 Some(session) if session.epoch == epoch => session.inbound.remove(&packet_id),
                 _ => return Err(PublishError::StaleSession),
             };
-            let mut ops = vec![WriteOp::DeleteMessage {
-                client_id: client_id.to_owned(),
-                packet_id,
-                direction: Direction::In,
-            }];
-            if let Some(message) = message {
-                let publish = IncomingPublish {
-                    topic: message.topic,
-                    payload: message.payload,
-                    qos: message.qos,
-                    retain: message.retain,
-                    packet_id: Some(packet_id),
-                };
-                route(
-                    &mut state,
-                    &self.inner.config,
-                    client_id,
-                    &publish,
-                    &mut ops,
-                    &self.inner.messages_sent,
-                );
-            }
-            ops
+            let username = state
+                .sessions
+                .get(client_id)
+                .and_then(|session| session.username.clone());
+            (message, username)
         };
+        let mut ops = vec![WriteOp::DeleteMessage {
+            client_id: client_id.to_owned(),
+            packet_id,
+            direction: Direction::In,
+        }];
+        if let Some(message) = prepared.0 {
+            let publish = IncomingPublish {
+                topic: message.topic,
+                payload: message.payload,
+                qos: message.qos,
+                retain: message.retain,
+                packet_id: Some(packet_id),
+            };
+            ops.extend(
+                self.deliver(client_id, prepared.1.as_deref(), &publish)
+                    .await,
+            );
+        }
         let _ = self.persist(ops).await;
         Ok(ClientFlow::PubComp)
     }
@@ -1141,6 +1264,29 @@ impl Broker {
     /// End a connection. A stale epoch is ignored so a replaced connection cannot
     /// delete the new session.
     pub async fn disconnect(&self, request: DisconnectRequest) -> Result<(), CoreError> {
+        let observed = {
+            let state = self.lock();
+            match state.sessions.get(&request.client_id) {
+                Some(session) if session.epoch == request.epoch && session.connected => {
+                    Some((session.username.clone(), session.peer.clone()))
+                }
+                _ => None,
+            }
+        };
+        if let Some((username, peer)) = observed {
+            let extras = self
+                .hooks()
+                .on_disconnect(DisconnectEvent {
+                    client_id: request.client_id.clone(),
+                    username,
+                    peer,
+                })
+                .await;
+            let extra_ops = self.route_extra(extras).await;
+            if let Err(err) = self.persist(extra_ops).await {
+                tracing::warn!(error = %err, "持久化断开规则转发失败");
+            }
+        }
         let planned = {
             let mut state = self.lock();
             let Some(session) = state.sessions.get_mut(&request.client_id) else {
@@ -1216,7 +1362,7 @@ impl Broker {
     }
 
     async fn publish_pending_will(&self, client_id: &str, epoch: u64) -> Result<(), CoreError> {
-        let ops = {
+        let prepared = {
             let mut state = self.lock();
             let Some(session) = state.sessions.get_mut(client_id) else {
                 return Ok(());
@@ -1227,23 +1373,18 @@ impl Broker {
             let Some(will) = session.pending_will.take() else {
                 return Ok(());
             };
-            let mut ops = vec![WriteOp::UpsertClient(stored_client(session))];
-            let publish = incoming_from_will(&will);
-            route(
-                &mut state,
-                &self.inner.config,
-                client_id,
-                &publish,
-                &mut ops,
-                &self.inner.messages_sent,
-            );
-            ops
+            let username = session.username.clone();
+            let ops = vec![WriteOp::UpsertClient(stored_client(session))];
+            (will, username, ops)
         };
+        let (will, username, mut ops) = prepared;
+        let publish = incoming_from_will(&will);
+        ops.extend(self.deliver(client_id, username.as_deref(), &publish).await);
         self.persist(ops).await
     }
 
     async fn expire_session(&self, client_id: &str, epoch: u64) -> Result<(), CoreError> {
-        let ops = {
+        let prepared = {
             let mut state = self.lock();
             let Some(session) = state.sessions.get_mut(client_id) else {
                 return Ok(());
@@ -1252,21 +1393,16 @@ impl Broker {
                 return Ok(());
             }
             let will = session.pending_will.take().or_else(|| session.will.take());
+            let username = session.username.clone();
             let mut ops = Vec::new();
-            if let Some(will) = will {
-                let publish = incoming_from_will(&will);
-                route(
-                    &mut state,
-                    &self.inner.config,
-                    client_id,
-                    &publish,
-                    &mut ops,
-                    &self.inner.messages_sent,
-                );
-            }
             forget_session(&mut state, client_id, &mut ops);
-            ops
+            (will, username, ops)
         };
+        let (will, username, mut ops) = prepared;
+        if let Some(will) = will {
+            let publish = incoming_from_will(&will);
+            ops.extend(self.deliver(client_id, username.as_deref(), &publish).await);
+        }
         self.persist(ops).await
     }
 
@@ -1541,6 +1677,33 @@ fn subscribe_one(
             }
             SubscribeAck::Granted(filter.opts.qos)
         }
+    }
+}
+
+fn route_extras(
+    state: &mut State,
+    config: &BrokerConfig,
+    publishes: Vec<HookPublish>,
+    ops: &mut Vec<WriteOp>,
+    sent: &AtomicU64,
+) {
+    for extra in publishes {
+        if !valid_topic_name(&extra.topic) {
+            tracing::debug!(topic = %extra.topic, "丢弃主题名无效的规则转发");
+            continue;
+        }
+        let Ok(qos) = QoS::try_from(extra.qos) else {
+            tracing::debug!(qos = extra.qos, "丢弃 QoS 无效的规则转发");
+            continue;
+        };
+        let republish = IncomingPublish {
+            topic: extra.topic,
+            payload: extra.payload,
+            qos,
+            retain: extra.retain,
+            packet_id: None,
+        };
+        route(state, config, "$rules", &republish, ops, sent);
     }
 }
 

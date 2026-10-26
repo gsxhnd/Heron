@@ -280,7 +280,10 @@ impl PublishPacketBuilder {
 
 impl PublishPacket {
     /// Returns a new [`PublishPacketBuilder`] for creating PUBLISH packets.
-    pub fn builder(topic_name: impl Into<String>, payload: impl Into<Bytes>) -> PublishPacketBuilder {
+    pub fn builder(
+        topic_name: impl Into<String>,
+        payload: impl Into<Bytes>,
+    ) -> PublishPacketBuilder {
         PublishPacketBuilder::new(topic_name, payload)
     }
 }
@@ -415,4 +418,3 @@ impl UnsubscribePacket {
         UnsubscribePacketBuilder::new(packet_id)
     }
 }
-

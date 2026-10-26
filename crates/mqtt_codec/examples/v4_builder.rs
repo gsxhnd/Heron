@@ -83,7 +83,9 @@ fn main() {
         .build();
 
     let mut buffer = BytesMut::new();
-    codec.encode(Packet::Connect(original.clone()), &mut buffer).unwrap();
+    codec
+        .encode(Packet::Connect(original.clone()), &mut buffer)
+        .unwrap();
 
     if let Some(Packet::Connect(decoded)) = codec.decode(&mut buffer).unwrap() {
         assert_eq!(original.client_id, decoded.client_id);

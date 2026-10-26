@@ -3,13 +3,13 @@
 //! This module provides validation functions that ensure MQTT packets
 //! conform to the MQTT v5.0 specification requirements.
 
-use crate::error::MqttError;
-use crate::v4::{self, validate_packet_id};
 use super::packet::{
     AuthPacket, ConnAckPacket, ConnectPacket, DisconnectPacket, Packet, PacketType, Properties,
-    PubAckPacket, PubCompPacket, PublishPacket, PubRecPacket, PubRelPacket, QoS, ReasonCode,
+    PubAckPacket, PubCompPacket, PubRecPacket, PubRelPacket, PublishPacket, QoS, ReasonCode,
     SubAckPacket, SubscribePacket, SubscriptionOption, UnsubAckPacket, UnsubscribePacket,
 };
+use crate::error::MqttError;
+use crate::v4::{self, validate_packet_id};
 
 // ============================================================================
 // Constants
@@ -61,7 +61,10 @@ pub fn validate_connect_packet(packet: &ConnectPacket) -> Result<(), MqttError> 
 pub fn validate_protocol_name(name: &str) -> Result<(), MqttError> {
     if name != PROTOCOL_NAME_MQTT {
         return Err(MqttError::protocol_violation(
-            format!("Invalid protocol name: expected '{}', got '{}'", PROTOCOL_NAME_MQTT, name),
+            format!(
+                "Invalid protocol name: expected '{}', got '{}'",
+                PROTOCOL_NAME_MQTT, name
+            ),
             Some(1),
         ));
     }
@@ -78,7 +81,10 @@ pub fn validate_protocol_name(name: &str) -> Result<(), MqttError> {
 pub fn validate_protocol_level(level: u8) -> Result<(), MqttError> {
     if level != PROTOCOL_LEVEL_V5 {
         return Err(MqttError::protocol_violation(
-            format!("Invalid protocol level: expected {}, got {}", PROTOCOL_LEVEL_V5, level),
+            format!(
+                "Invalid protocol level: expected {}, got {}",
+                PROTOCOL_LEVEL_V5, level
+            ),
             Some(1),
         ));
     }
@@ -275,10 +281,16 @@ pub fn validate_will_properties(props: &Properties) -> Result<(), MqttError> {
 ///
 /// * `props` - The properties to validate.
 /// * `packet_type` - The packet type the properties belong to.
-pub fn validate_property_scope(props: &Properties, packet_type: PacketType) -> Result<(), MqttError> {
+pub fn validate_property_scope(
+    props: &Properties,
+    packet_type: PacketType,
+) -> Result<(), MqttError> {
     let err = |prop_name: &str| -> MqttError {
         MqttError::protocol_violation(
-            format!("Property '{}' is not allowed in {:?} packet", prop_name, packet_type),
+            format!(
+                "Property '{}' is not allowed in {:?} packet",
+                prop_name, packet_type
+            ),
             None,
         )
     };
@@ -288,24 +300,60 @@ pub fn validate_property_scope(props: &Properties, packet_type: PacketType) -> R
             // CONNECT allows: session_expiry_interval, receive_maximum, maximum_packet_size,
             // topic_alias_maximum, request_response_information, request_problem_information,
             // user_properties, authentication_method, authentication_data
-            if props.assigned_client_identifier.is_some() { return Err(err("Assigned Client Identifier")); }
-            if props.server_keep_alive.is_some() { return Err(err("Server Keep Alive")); }
-            if props.response_information.is_some() { return Err(err("Response Information")); }
-            if props.server_reference.is_some() { return Err(err("Server Reference")); }
-            if props.maximum_qos.is_some() { return Err(err("Maximum QoS")); }
-            if props.retain_available.is_some() { return Err(err("Retain Available")); }
-            if props.wildcard_subscription_available.is_some() { return Err(err("Wildcard Subscription Available")); }
-            if props.subscription_identifiers_available.is_some() { return Err(err("Subscription Identifiers Available")); }
-            if props.shared_subscription_available.is_some() { return Err(err("Shared Subscription Available")); }
-            if props.topic_alias.is_some() { return Err(err("Topic Alias")); }
-            if props.payload_format_indicator.is_some() { return Err(err("Payload Format Indicator")); }
-            if props.message_expiry_interval.is_some() { return Err(err("Message Expiry Interval")); }
-            if props.content_type.is_some() { return Err(err("Content Type")); }
-            if props.response_topic.is_some() { return Err(err("Response Topic")); }
-            if props.correlation_data.is_some() { return Err(err("Correlation Data")); }
-            if !props.subscription_identifiers.is_empty() { return Err(err("Subscription Identifier")); }
-            if props.reason_string.is_some() { return Err(err("Reason String")); }
-            if props.will_delay_interval.is_some() { return Err(err("Will Delay Interval")); }
+            if props.assigned_client_identifier.is_some() {
+                return Err(err("Assigned Client Identifier"));
+            }
+            if props.server_keep_alive.is_some() {
+                return Err(err("Server Keep Alive"));
+            }
+            if props.response_information.is_some() {
+                return Err(err("Response Information"));
+            }
+            if props.server_reference.is_some() {
+                return Err(err("Server Reference"));
+            }
+            if props.maximum_qos.is_some() {
+                return Err(err("Maximum QoS"));
+            }
+            if props.retain_available.is_some() {
+                return Err(err("Retain Available"));
+            }
+            if props.wildcard_subscription_available.is_some() {
+                return Err(err("Wildcard Subscription Available"));
+            }
+            if props.subscription_identifiers_available.is_some() {
+                return Err(err("Subscription Identifiers Available"));
+            }
+            if props.shared_subscription_available.is_some() {
+                return Err(err("Shared Subscription Available"));
+            }
+            if props.topic_alias.is_some() {
+                return Err(err("Topic Alias"));
+            }
+            if props.payload_format_indicator.is_some() {
+                return Err(err("Payload Format Indicator"));
+            }
+            if props.message_expiry_interval.is_some() {
+                return Err(err("Message Expiry Interval"));
+            }
+            if props.content_type.is_some() {
+                return Err(err("Content Type"));
+            }
+            if props.response_topic.is_some() {
+                return Err(err("Response Topic"));
+            }
+            if props.correlation_data.is_some() {
+                return Err(err("Correlation Data"));
+            }
+            if !props.subscription_identifiers.is_empty() {
+                return Err(err("Subscription Identifier"));
+            }
+            if props.reason_string.is_some() {
+                return Err(err("Reason String"));
+            }
+            if props.will_delay_interval.is_some() {
+                return Err(err("Will Delay Interval"));
+            }
         }
         PacketType::ConnAck => {
             // CONNACK allows: session_expiry_interval, receive_maximum, maximum_qos,
@@ -314,206 +362,558 @@ pub fn validate_property_scope(props: &Properties, packet_type: PacketType) -> R
             // subscription_identifiers_available, shared_subscription_available,
             // server_keep_alive, response_information, server_reference,
             // authentication_method, authentication_data
-            if props.topic_alias.is_some() { return Err(err("Topic Alias")); }
-            if props.payload_format_indicator.is_some() { return Err(err("Payload Format Indicator")); }
-            if props.message_expiry_interval.is_some() { return Err(err("Message Expiry Interval")); }
-            if props.content_type.is_some() { return Err(err("Content Type")); }
-            if props.response_topic.is_some() { return Err(err("Response Topic")); }
-            if props.correlation_data.is_some() { return Err(err("Correlation Data")); }
-            if !props.subscription_identifiers.is_empty() { return Err(err("Subscription Identifier")); }
-            if props.will_delay_interval.is_some() { return Err(err("Will Delay Interval")); }
-            if props.request_response_information.is_some() { return Err(err("Request Response Information")); }
-            if props.request_problem_information.is_some() { return Err(err("Request Problem Information")); }
+            if props.topic_alias.is_some() {
+                return Err(err("Topic Alias"));
+            }
+            if props.payload_format_indicator.is_some() {
+                return Err(err("Payload Format Indicator"));
+            }
+            if props.message_expiry_interval.is_some() {
+                return Err(err("Message Expiry Interval"));
+            }
+            if props.content_type.is_some() {
+                return Err(err("Content Type"));
+            }
+            if props.response_topic.is_some() {
+                return Err(err("Response Topic"));
+            }
+            if props.correlation_data.is_some() {
+                return Err(err("Correlation Data"));
+            }
+            if !props.subscription_identifiers.is_empty() {
+                return Err(err("Subscription Identifier"));
+            }
+            if props.will_delay_interval.is_some() {
+                return Err(err("Will Delay Interval"));
+            }
+            if props.request_response_information.is_some() {
+                return Err(err("Request Response Information"));
+            }
+            if props.request_problem_information.is_some() {
+                return Err(err("Request Problem Information"));
+            }
         }
         PacketType::Publish => {
             // PUBLISH allows: payload_format_indicator, message_expiry_interval,
             // topic_alias, response_topic, correlation_data, user_properties,
             // subscription_identifiers (only in messages from server to client), content_type
-            if props.session_expiry_interval.is_some() { return Err(err("Session Expiry Interval")); }
-            if props.receive_maximum.is_some() { return Err(err("Receive Maximum")); }
-            if props.maximum_packet_size.is_some() { return Err(err("Maximum Packet Size")); }
-            if props.topic_alias_maximum.is_some() { return Err(err("Topic Alias Maximum")); }
-            if props.assigned_client_identifier.is_some() { return Err(err("Assigned Client Identifier")); }
-            if props.server_keep_alive.is_some() { return Err(err("Server Keep Alive")); }
-            if props.maximum_qos.is_some() { return Err(err("Maximum QoS")); }
-            if props.retain_available.is_some() { return Err(err("Retain Available")); }
-            if props.wildcard_subscription_available.is_some() { return Err(err("Wildcard Subscription Available")); }
-            if props.subscription_identifiers_available.is_some() { return Err(err("Subscription Identifiers Available")); }
-            if props.shared_subscription_available.is_some() { return Err(err("Shared Subscription Available")); }
-            if props.authentication_method.is_some() { return Err(err("Authentication Method")); }
-            if props.authentication_data.is_some() { return Err(err("Authentication Data")); }
-            if props.server_reference.is_some() { return Err(err("Server Reference")); }
-            if props.reason_string.is_some() { return Err(err("Reason String")); }
-            if props.request_response_information.is_some() { return Err(err("Request Response Information")); }
-            if props.request_problem_information.is_some() { return Err(err("Request Problem Information")); }
-            if props.will_delay_interval.is_some() { return Err(err("Will Delay Interval")); }
-            if props.response_information.is_some() { return Err(err("Response Information")); }
+            if props.session_expiry_interval.is_some() {
+                return Err(err("Session Expiry Interval"));
+            }
+            if props.receive_maximum.is_some() {
+                return Err(err("Receive Maximum"));
+            }
+            if props.maximum_packet_size.is_some() {
+                return Err(err("Maximum Packet Size"));
+            }
+            if props.topic_alias_maximum.is_some() {
+                return Err(err("Topic Alias Maximum"));
+            }
+            if props.assigned_client_identifier.is_some() {
+                return Err(err("Assigned Client Identifier"));
+            }
+            if props.server_keep_alive.is_some() {
+                return Err(err("Server Keep Alive"));
+            }
+            if props.maximum_qos.is_some() {
+                return Err(err("Maximum QoS"));
+            }
+            if props.retain_available.is_some() {
+                return Err(err("Retain Available"));
+            }
+            if props.wildcard_subscription_available.is_some() {
+                return Err(err("Wildcard Subscription Available"));
+            }
+            if props.subscription_identifiers_available.is_some() {
+                return Err(err("Subscription Identifiers Available"));
+            }
+            if props.shared_subscription_available.is_some() {
+                return Err(err("Shared Subscription Available"));
+            }
+            if props.authentication_method.is_some() {
+                return Err(err("Authentication Method"));
+            }
+            if props.authentication_data.is_some() {
+                return Err(err("Authentication Data"));
+            }
+            if props.server_reference.is_some() {
+                return Err(err("Server Reference"));
+            }
+            if props.reason_string.is_some() {
+                return Err(err("Reason String"));
+            }
+            if props.request_response_information.is_some() {
+                return Err(err("Request Response Information"));
+            }
+            if props.request_problem_information.is_some() {
+                return Err(err("Request Problem Information"));
+            }
+            if props.will_delay_interval.is_some() {
+                return Err(err("Will Delay Interval"));
+            }
+            if props.response_information.is_some() {
+                return Err(err("Response Information"));
+            }
         }
         PacketType::PubAck | PacketType::PubRec | PacketType::PubRel | PacketType::PubComp => {
             // These allow: reason_string, user_properties
-            if props.session_expiry_interval.is_some() { return Err(err("Session Expiry Interval")); }
-            if props.receive_maximum.is_some() { return Err(err("Receive Maximum")); }
-            if props.maximum_packet_size.is_some() { return Err(err("Maximum Packet Size")); }
-            if props.topic_alias_maximum.is_some() { return Err(err("Topic Alias Maximum")); }
-            if props.topic_alias.is_some() { return Err(err("Topic Alias")); }
-            if props.payload_format_indicator.is_some() { return Err(err("Payload Format Indicator")); }
-            if props.message_expiry_interval.is_some() { return Err(err("Message Expiry Interval")); }
-            if props.content_type.is_some() { return Err(err("Content Type")); }
-            if props.response_topic.is_some() { return Err(err("Response Topic")); }
-            if props.correlation_data.is_some() { return Err(err("Correlation Data")); }
-            if !props.subscription_identifiers.is_empty() { return Err(err("Subscription Identifier")); }
-            if props.assigned_client_identifier.is_some() { return Err(err("Assigned Client Identifier")); }
-            if props.server_keep_alive.is_some() { return Err(err("Server Keep Alive")); }
-            if props.maximum_qos.is_some() { return Err(err("Maximum QoS")); }
-            if props.retain_available.is_some() { return Err(err("Retain Available")); }
-            if props.wildcard_subscription_available.is_some() { return Err(err("Wildcard Subscription Available")); }
-            if props.subscription_identifiers_available.is_some() { return Err(err("Subscription Identifiers Available")); }
-            if props.shared_subscription_available.is_some() { return Err(err("Shared Subscription Available")); }
-            if props.authentication_method.is_some() { return Err(err("Authentication Method")); }
-            if props.authentication_data.is_some() { return Err(err("Authentication Data")); }
-            if props.server_reference.is_some() { return Err(err("Server Reference")); }
-            if props.will_delay_interval.is_some() { return Err(err("Will Delay Interval")); }
-            if props.request_response_information.is_some() { return Err(err("Request Response Information")); }
-            if props.request_problem_information.is_some() { return Err(err("Request Problem Information")); }
-            if props.response_information.is_some() { return Err(err("Response Information")); }
+            if props.session_expiry_interval.is_some() {
+                return Err(err("Session Expiry Interval"));
+            }
+            if props.receive_maximum.is_some() {
+                return Err(err("Receive Maximum"));
+            }
+            if props.maximum_packet_size.is_some() {
+                return Err(err("Maximum Packet Size"));
+            }
+            if props.topic_alias_maximum.is_some() {
+                return Err(err("Topic Alias Maximum"));
+            }
+            if props.topic_alias.is_some() {
+                return Err(err("Topic Alias"));
+            }
+            if props.payload_format_indicator.is_some() {
+                return Err(err("Payload Format Indicator"));
+            }
+            if props.message_expiry_interval.is_some() {
+                return Err(err("Message Expiry Interval"));
+            }
+            if props.content_type.is_some() {
+                return Err(err("Content Type"));
+            }
+            if props.response_topic.is_some() {
+                return Err(err("Response Topic"));
+            }
+            if props.correlation_data.is_some() {
+                return Err(err("Correlation Data"));
+            }
+            if !props.subscription_identifiers.is_empty() {
+                return Err(err("Subscription Identifier"));
+            }
+            if props.assigned_client_identifier.is_some() {
+                return Err(err("Assigned Client Identifier"));
+            }
+            if props.server_keep_alive.is_some() {
+                return Err(err("Server Keep Alive"));
+            }
+            if props.maximum_qos.is_some() {
+                return Err(err("Maximum QoS"));
+            }
+            if props.retain_available.is_some() {
+                return Err(err("Retain Available"));
+            }
+            if props.wildcard_subscription_available.is_some() {
+                return Err(err("Wildcard Subscription Available"));
+            }
+            if props.subscription_identifiers_available.is_some() {
+                return Err(err("Subscription Identifiers Available"));
+            }
+            if props.shared_subscription_available.is_some() {
+                return Err(err("Shared Subscription Available"));
+            }
+            if props.authentication_method.is_some() {
+                return Err(err("Authentication Method"));
+            }
+            if props.authentication_data.is_some() {
+                return Err(err("Authentication Data"));
+            }
+            if props.server_reference.is_some() {
+                return Err(err("Server Reference"));
+            }
+            if props.will_delay_interval.is_some() {
+                return Err(err("Will Delay Interval"));
+            }
+            if props.request_response_information.is_some() {
+                return Err(err("Request Response Information"));
+            }
+            if props.request_problem_information.is_some() {
+                return Err(err("Request Problem Information"));
+            }
+            if props.response_information.is_some() {
+                return Err(err("Response Information"));
+            }
         }
         PacketType::Subscribe => {
             // SUBSCRIBE allows: subscription_identifier, user_properties
-            if props.session_expiry_interval.is_some() { return Err(err("Session Expiry Interval")); }
-            if props.receive_maximum.is_some() { return Err(err("Receive Maximum")); }
-            if props.maximum_packet_size.is_some() { return Err(err("Maximum Packet Size")); }
-            if props.topic_alias_maximum.is_some() { return Err(err("Topic Alias Maximum")); }
-            if props.topic_alias.is_some() { return Err(err("Topic Alias")); }
-            if props.payload_format_indicator.is_some() { return Err(err("Payload Format Indicator")); }
-            if props.message_expiry_interval.is_some() { return Err(err("Message Expiry Interval")); }
-            if props.content_type.is_some() { return Err(err("Content Type")); }
-            if props.response_topic.is_some() { return Err(err("Response Topic")); }
-            if props.correlation_data.is_some() { return Err(err("Correlation Data")); }
-            if props.assigned_client_identifier.is_some() { return Err(err("Assigned Client Identifier")); }
-            if props.server_keep_alive.is_some() { return Err(err("Server Keep Alive")); }
-            if props.maximum_qos.is_some() { return Err(err("Maximum QoS")); }
-            if props.retain_available.is_some() { return Err(err("Retain Available")); }
-            if props.wildcard_subscription_available.is_some() { return Err(err("Wildcard Subscription Available")); }
-            if props.subscription_identifiers_available.is_some() { return Err(err("Subscription Identifiers Available")); }
-            if props.shared_subscription_available.is_some() { return Err(err("Shared Subscription Available")); }
-            if props.authentication_method.is_some() { return Err(err("Authentication Method")); }
-            if props.authentication_data.is_some() { return Err(err("Authentication Data")); }
-            if props.server_reference.is_some() { return Err(err("Server Reference")); }
-            if props.reason_string.is_some() { return Err(err("Reason String")); }
-            if props.will_delay_interval.is_some() { return Err(err("Will Delay Interval")); }
-            if props.request_response_information.is_some() { return Err(err("Request Response Information")); }
-            if props.request_problem_information.is_some() { return Err(err("Request Problem Information")); }
-            if props.response_information.is_some() { return Err(err("Response Information")); }
+            if props.session_expiry_interval.is_some() {
+                return Err(err("Session Expiry Interval"));
+            }
+            if props.receive_maximum.is_some() {
+                return Err(err("Receive Maximum"));
+            }
+            if props.maximum_packet_size.is_some() {
+                return Err(err("Maximum Packet Size"));
+            }
+            if props.topic_alias_maximum.is_some() {
+                return Err(err("Topic Alias Maximum"));
+            }
+            if props.topic_alias.is_some() {
+                return Err(err("Topic Alias"));
+            }
+            if props.payload_format_indicator.is_some() {
+                return Err(err("Payload Format Indicator"));
+            }
+            if props.message_expiry_interval.is_some() {
+                return Err(err("Message Expiry Interval"));
+            }
+            if props.content_type.is_some() {
+                return Err(err("Content Type"));
+            }
+            if props.response_topic.is_some() {
+                return Err(err("Response Topic"));
+            }
+            if props.correlation_data.is_some() {
+                return Err(err("Correlation Data"));
+            }
+            if props.assigned_client_identifier.is_some() {
+                return Err(err("Assigned Client Identifier"));
+            }
+            if props.server_keep_alive.is_some() {
+                return Err(err("Server Keep Alive"));
+            }
+            if props.maximum_qos.is_some() {
+                return Err(err("Maximum QoS"));
+            }
+            if props.retain_available.is_some() {
+                return Err(err("Retain Available"));
+            }
+            if props.wildcard_subscription_available.is_some() {
+                return Err(err("Wildcard Subscription Available"));
+            }
+            if props.subscription_identifiers_available.is_some() {
+                return Err(err("Subscription Identifiers Available"));
+            }
+            if props.shared_subscription_available.is_some() {
+                return Err(err("Shared Subscription Available"));
+            }
+            if props.authentication_method.is_some() {
+                return Err(err("Authentication Method"));
+            }
+            if props.authentication_data.is_some() {
+                return Err(err("Authentication Data"));
+            }
+            if props.server_reference.is_some() {
+                return Err(err("Server Reference"));
+            }
+            if props.reason_string.is_some() {
+                return Err(err("Reason String"));
+            }
+            if props.will_delay_interval.is_some() {
+                return Err(err("Will Delay Interval"));
+            }
+            if props.request_response_information.is_some() {
+                return Err(err("Request Response Information"));
+            }
+            if props.request_problem_information.is_some() {
+                return Err(err("Request Problem Information"));
+            }
+            if props.response_information.is_some() {
+                return Err(err("Response Information"));
+            }
         }
         PacketType::SubAck | PacketType::UnsubAck => {
             // These allow: reason_string, user_properties
-            if props.session_expiry_interval.is_some() { return Err(err("Session Expiry Interval")); }
-            if props.receive_maximum.is_some() { return Err(err("Receive Maximum")); }
-            if props.maximum_packet_size.is_some() { return Err(err("Maximum Packet Size")); }
-            if props.topic_alias_maximum.is_some() { return Err(err("Topic Alias Maximum")); }
-            if props.topic_alias.is_some() { return Err(err("Topic Alias")); }
-            if props.payload_format_indicator.is_some() { return Err(err("Payload Format Indicator")); }
-            if props.message_expiry_interval.is_some() { return Err(err("Message Expiry Interval")); }
-            if props.content_type.is_some() { return Err(err("Content Type")); }
-            if props.response_topic.is_some() { return Err(err("Response Topic")); }
-            if props.correlation_data.is_some() { return Err(err("Correlation Data")); }
-            if !props.subscription_identifiers.is_empty() { return Err(err("Subscription Identifier")); }
-            if props.assigned_client_identifier.is_some() { return Err(err("Assigned Client Identifier")); }
-            if props.server_keep_alive.is_some() { return Err(err("Server Keep Alive")); }
-            if props.maximum_qos.is_some() { return Err(err("Maximum QoS")); }
-            if props.retain_available.is_some() { return Err(err("Retain Available")); }
-            if props.wildcard_subscription_available.is_some() { return Err(err("Wildcard Subscription Available")); }
-            if props.subscription_identifiers_available.is_some() { return Err(err("Subscription Identifiers Available")); }
-            if props.shared_subscription_available.is_some() { return Err(err("Shared Subscription Available")); }
-            if props.authentication_method.is_some() { return Err(err("Authentication Method")); }
-            if props.authentication_data.is_some() { return Err(err("Authentication Data")); }
-            if props.server_reference.is_some() { return Err(err("Server Reference")); }
-            if props.will_delay_interval.is_some() { return Err(err("Will Delay Interval")); }
-            if props.request_response_information.is_some() { return Err(err("Request Response Information")); }
-            if props.request_problem_information.is_some() { return Err(err("Request Problem Information")); }
-            if props.response_information.is_some() { return Err(err("Response Information")); }
+            if props.session_expiry_interval.is_some() {
+                return Err(err("Session Expiry Interval"));
+            }
+            if props.receive_maximum.is_some() {
+                return Err(err("Receive Maximum"));
+            }
+            if props.maximum_packet_size.is_some() {
+                return Err(err("Maximum Packet Size"));
+            }
+            if props.topic_alias_maximum.is_some() {
+                return Err(err("Topic Alias Maximum"));
+            }
+            if props.topic_alias.is_some() {
+                return Err(err("Topic Alias"));
+            }
+            if props.payload_format_indicator.is_some() {
+                return Err(err("Payload Format Indicator"));
+            }
+            if props.message_expiry_interval.is_some() {
+                return Err(err("Message Expiry Interval"));
+            }
+            if props.content_type.is_some() {
+                return Err(err("Content Type"));
+            }
+            if props.response_topic.is_some() {
+                return Err(err("Response Topic"));
+            }
+            if props.correlation_data.is_some() {
+                return Err(err("Correlation Data"));
+            }
+            if !props.subscription_identifiers.is_empty() {
+                return Err(err("Subscription Identifier"));
+            }
+            if props.assigned_client_identifier.is_some() {
+                return Err(err("Assigned Client Identifier"));
+            }
+            if props.server_keep_alive.is_some() {
+                return Err(err("Server Keep Alive"));
+            }
+            if props.maximum_qos.is_some() {
+                return Err(err("Maximum QoS"));
+            }
+            if props.retain_available.is_some() {
+                return Err(err("Retain Available"));
+            }
+            if props.wildcard_subscription_available.is_some() {
+                return Err(err("Wildcard Subscription Available"));
+            }
+            if props.subscription_identifiers_available.is_some() {
+                return Err(err("Subscription Identifiers Available"));
+            }
+            if props.shared_subscription_available.is_some() {
+                return Err(err("Shared Subscription Available"));
+            }
+            if props.authentication_method.is_some() {
+                return Err(err("Authentication Method"));
+            }
+            if props.authentication_data.is_some() {
+                return Err(err("Authentication Data"));
+            }
+            if props.server_reference.is_some() {
+                return Err(err("Server Reference"));
+            }
+            if props.will_delay_interval.is_some() {
+                return Err(err("Will Delay Interval"));
+            }
+            if props.request_response_information.is_some() {
+                return Err(err("Request Response Information"));
+            }
+            if props.request_problem_information.is_some() {
+                return Err(err("Request Problem Information"));
+            }
+            if props.response_information.is_some() {
+                return Err(err("Response Information"));
+            }
         }
         PacketType::Unsubscribe => {
             // UNSUBSCRIBE allows: user_properties
-            if props.session_expiry_interval.is_some() { return Err(err("Session Expiry Interval")); }
-            if props.receive_maximum.is_some() { return Err(err("Receive Maximum")); }
-            if props.maximum_packet_size.is_some() { return Err(err("Maximum Packet Size")); }
-            if props.topic_alias_maximum.is_some() { return Err(err("Topic Alias Maximum")); }
-            if props.topic_alias.is_some() { return Err(err("Topic Alias")); }
-            if props.payload_format_indicator.is_some() { return Err(err("Payload Format Indicator")); }
-            if props.message_expiry_interval.is_some() { return Err(err("Message Expiry Interval")); }
-            if props.content_type.is_some() { return Err(err("Content Type")); }
-            if props.response_topic.is_some() { return Err(err("Response Topic")); }
-            if props.correlation_data.is_some() { return Err(err("Correlation Data")); }
-            if !props.subscription_identifiers.is_empty() { return Err(err("Subscription Identifier")); }
-            if props.assigned_client_identifier.is_some() { return Err(err("Assigned Client Identifier")); }
-            if props.server_keep_alive.is_some() { return Err(err("Server Keep Alive")); }
-            if props.maximum_qos.is_some() { return Err(err("Maximum QoS")); }
-            if props.retain_available.is_some() { return Err(err("Retain Available")); }
-            if props.wildcard_subscription_available.is_some() { return Err(err("Wildcard Subscription Available")); }
-            if props.subscription_identifiers_available.is_some() { return Err(err("Subscription Identifiers Available")); }
-            if props.shared_subscription_available.is_some() { return Err(err("Shared Subscription Available")); }
-            if props.authentication_method.is_some() { return Err(err("Authentication Method")); }
-            if props.authentication_data.is_some() { return Err(err("Authentication Data")); }
-            if props.server_reference.is_some() { return Err(err("Server Reference")); }
-            if props.reason_string.is_some() { return Err(err("Reason String")); }
-            if props.will_delay_interval.is_some() { return Err(err("Will Delay Interval")); }
-            if props.request_response_information.is_some() { return Err(err("Request Response Information")); }
-            if props.request_problem_information.is_some() { return Err(err("Request Problem Information")); }
-            if props.response_information.is_some() { return Err(err("Response Information")); }
+            if props.session_expiry_interval.is_some() {
+                return Err(err("Session Expiry Interval"));
+            }
+            if props.receive_maximum.is_some() {
+                return Err(err("Receive Maximum"));
+            }
+            if props.maximum_packet_size.is_some() {
+                return Err(err("Maximum Packet Size"));
+            }
+            if props.topic_alias_maximum.is_some() {
+                return Err(err("Topic Alias Maximum"));
+            }
+            if props.topic_alias.is_some() {
+                return Err(err("Topic Alias"));
+            }
+            if props.payload_format_indicator.is_some() {
+                return Err(err("Payload Format Indicator"));
+            }
+            if props.message_expiry_interval.is_some() {
+                return Err(err("Message Expiry Interval"));
+            }
+            if props.content_type.is_some() {
+                return Err(err("Content Type"));
+            }
+            if props.response_topic.is_some() {
+                return Err(err("Response Topic"));
+            }
+            if props.correlation_data.is_some() {
+                return Err(err("Correlation Data"));
+            }
+            if !props.subscription_identifiers.is_empty() {
+                return Err(err("Subscription Identifier"));
+            }
+            if props.assigned_client_identifier.is_some() {
+                return Err(err("Assigned Client Identifier"));
+            }
+            if props.server_keep_alive.is_some() {
+                return Err(err("Server Keep Alive"));
+            }
+            if props.maximum_qos.is_some() {
+                return Err(err("Maximum QoS"));
+            }
+            if props.retain_available.is_some() {
+                return Err(err("Retain Available"));
+            }
+            if props.wildcard_subscription_available.is_some() {
+                return Err(err("Wildcard Subscription Available"));
+            }
+            if props.subscription_identifiers_available.is_some() {
+                return Err(err("Subscription Identifiers Available"));
+            }
+            if props.shared_subscription_available.is_some() {
+                return Err(err("Shared Subscription Available"));
+            }
+            if props.authentication_method.is_some() {
+                return Err(err("Authentication Method"));
+            }
+            if props.authentication_data.is_some() {
+                return Err(err("Authentication Data"));
+            }
+            if props.server_reference.is_some() {
+                return Err(err("Server Reference"));
+            }
+            if props.reason_string.is_some() {
+                return Err(err("Reason String"));
+            }
+            if props.will_delay_interval.is_some() {
+                return Err(err("Will Delay Interval"));
+            }
+            if props.request_response_information.is_some() {
+                return Err(err("Request Response Information"));
+            }
+            if props.request_problem_information.is_some() {
+                return Err(err("Request Problem Information"));
+            }
+            if props.response_information.is_some() {
+                return Err(err("Response Information"));
+            }
         }
         PacketType::Disconnect => {
             // DISCONNECT allows: session_expiry_interval, reason_string, user_properties,
             // server_reference
-            if props.receive_maximum.is_some() { return Err(err("Receive Maximum")); }
-            if props.maximum_packet_size.is_some() { return Err(err("Maximum Packet Size")); }
-            if props.topic_alias_maximum.is_some() { return Err(err("Topic Alias Maximum")); }
-            if props.topic_alias.is_some() { return Err(err("Topic Alias")); }
-            if props.payload_format_indicator.is_some() { return Err(err("Payload Format Indicator")); }
-            if props.message_expiry_interval.is_some() { return Err(err("Message Expiry Interval")); }
-            if props.content_type.is_some() { return Err(err("Content Type")); }
-            if props.response_topic.is_some() { return Err(err("Response Topic")); }
-            if props.correlation_data.is_some() { return Err(err("Correlation Data")); }
-            if !props.subscription_identifiers.is_empty() { return Err(err("Subscription Identifier")); }
-            if props.assigned_client_identifier.is_some() { return Err(err("Assigned Client Identifier")); }
-            if props.server_keep_alive.is_some() { return Err(err("Server Keep Alive")); }
-            if props.maximum_qos.is_some() { return Err(err("Maximum QoS")); }
-            if props.retain_available.is_some() { return Err(err("Retain Available")); }
-            if props.wildcard_subscription_available.is_some() { return Err(err("Wildcard Subscription Available")); }
-            if props.subscription_identifiers_available.is_some() { return Err(err("Subscription Identifiers Available")); }
-            if props.shared_subscription_available.is_some() { return Err(err("Shared Subscription Available")); }
-            if props.authentication_method.is_some() { return Err(err("Authentication Method")); }
-            if props.authentication_data.is_some() { return Err(err("Authentication Data")); }
-            if props.will_delay_interval.is_some() { return Err(err("Will Delay Interval")); }
-            if props.request_response_information.is_some() { return Err(err("Request Response Information")); }
-            if props.request_problem_information.is_some() { return Err(err("Request Problem Information")); }
-            if props.response_information.is_some() { return Err(err("Response Information")); }
+            if props.receive_maximum.is_some() {
+                return Err(err("Receive Maximum"));
+            }
+            if props.maximum_packet_size.is_some() {
+                return Err(err("Maximum Packet Size"));
+            }
+            if props.topic_alias_maximum.is_some() {
+                return Err(err("Topic Alias Maximum"));
+            }
+            if props.topic_alias.is_some() {
+                return Err(err("Topic Alias"));
+            }
+            if props.payload_format_indicator.is_some() {
+                return Err(err("Payload Format Indicator"));
+            }
+            if props.message_expiry_interval.is_some() {
+                return Err(err("Message Expiry Interval"));
+            }
+            if props.content_type.is_some() {
+                return Err(err("Content Type"));
+            }
+            if props.response_topic.is_some() {
+                return Err(err("Response Topic"));
+            }
+            if props.correlation_data.is_some() {
+                return Err(err("Correlation Data"));
+            }
+            if !props.subscription_identifiers.is_empty() {
+                return Err(err("Subscription Identifier"));
+            }
+            if props.assigned_client_identifier.is_some() {
+                return Err(err("Assigned Client Identifier"));
+            }
+            if props.server_keep_alive.is_some() {
+                return Err(err("Server Keep Alive"));
+            }
+            if props.maximum_qos.is_some() {
+                return Err(err("Maximum QoS"));
+            }
+            if props.retain_available.is_some() {
+                return Err(err("Retain Available"));
+            }
+            if props.wildcard_subscription_available.is_some() {
+                return Err(err("Wildcard Subscription Available"));
+            }
+            if props.subscription_identifiers_available.is_some() {
+                return Err(err("Subscription Identifiers Available"));
+            }
+            if props.shared_subscription_available.is_some() {
+                return Err(err("Shared Subscription Available"));
+            }
+            if props.authentication_method.is_some() {
+                return Err(err("Authentication Method"));
+            }
+            if props.authentication_data.is_some() {
+                return Err(err("Authentication Data"));
+            }
+            if props.will_delay_interval.is_some() {
+                return Err(err("Will Delay Interval"));
+            }
+            if props.request_response_information.is_some() {
+                return Err(err("Request Response Information"));
+            }
+            if props.request_problem_information.is_some() {
+                return Err(err("Request Problem Information"));
+            }
+            if props.response_information.is_some() {
+                return Err(err("Response Information"));
+            }
         }
         PacketType::Auth => {
             // AUTH allows: authentication_method, authentication_data, reason_string, user_properties
-            if props.session_expiry_interval.is_some() { return Err(err("Session Expiry Interval")); }
-            if props.receive_maximum.is_some() { return Err(err("Receive Maximum")); }
-            if props.maximum_packet_size.is_some() { return Err(err("Maximum Packet Size")); }
-            if props.topic_alias_maximum.is_some() { return Err(err("Topic Alias Maximum")); }
-            if props.topic_alias.is_some() { return Err(err("Topic Alias")); }
-            if props.payload_format_indicator.is_some() { return Err(err("Payload Format Indicator")); }
-            if props.message_expiry_interval.is_some() { return Err(err("Message Expiry Interval")); }
-            if props.content_type.is_some() { return Err(err("Content Type")); }
-            if props.response_topic.is_some() { return Err(err("Response Topic")); }
-            if props.correlation_data.is_some() { return Err(err("Correlation Data")); }
-            if !props.subscription_identifiers.is_empty() { return Err(err("Subscription Identifier")); }
-            if props.assigned_client_identifier.is_some() { return Err(err("Assigned Client Identifier")); }
-            if props.server_keep_alive.is_some() { return Err(err("Server Keep Alive")); }
-            if props.maximum_qos.is_some() { return Err(err("Maximum QoS")); }
-            if props.retain_available.is_some() { return Err(err("Retain Available")); }
-            if props.wildcard_subscription_available.is_some() { return Err(err("Wildcard Subscription Available")); }
-            if props.subscription_identifiers_available.is_some() { return Err(err("Subscription Identifiers Available")); }
-            if props.shared_subscription_available.is_some() { return Err(err("Shared Subscription Available")); }
-            if props.server_reference.is_some() { return Err(err("Server Reference")); }
-            if props.will_delay_interval.is_some() { return Err(err("Will Delay Interval")); }
-            if props.request_response_information.is_some() { return Err(err("Request Response Information")); }
-            if props.request_problem_information.is_some() { return Err(err("Request Problem Information")); }
-            if props.response_information.is_some() { return Err(err("Response Information")); }
+            if props.session_expiry_interval.is_some() {
+                return Err(err("Session Expiry Interval"));
+            }
+            if props.receive_maximum.is_some() {
+                return Err(err("Receive Maximum"));
+            }
+            if props.maximum_packet_size.is_some() {
+                return Err(err("Maximum Packet Size"));
+            }
+            if props.topic_alias_maximum.is_some() {
+                return Err(err("Topic Alias Maximum"));
+            }
+            if props.topic_alias.is_some() {
+                return Err(err("Topic Alias"));
+            }
+            if props.payload_format_indicator.is_some() {
+                return Err(err("Payload Format Indicator"));
+            }
+            if props.message_expiry_interval.is_some() {
+                return Err(err("Message Expiry Interval"));
+            }
+            if props.content_type.is_some() {
+                return Err(err("Content Type"));
+            }
+            if props.response_topic.is_some() {
+                return Err(err("Response Topic"));
+            }
+            if props.correlation_data.is_some() {
+                return Err(err("Correlation Data"));
+            }
+            if !props.subscription_identifiers.is_empty() {
+                return Err(err("Subscription Identifier"));
+            }
+            if props.assigned_client_identifier.is_some() {
+                return Err(err("Assigned Client Identifier"));
+            }
+            if props.server_keep_alive.is_some() {
+                return Err(err("Server Keep Alive"));
+            }
+            if props.maximum_qos.is_some() {
+                return Err(err("Maximum QoS"));
+            }
+            if props.retain_available.is_some() {
+                return Err(err("Retain Available"));
+            }
+            if props.wildcard_subscription_available.is_some() {
+                return Err(err("Wildcard Subscription Available"));
+            }
+            if props.subscription_identifiers_available.is_some() {
+                return Err(err("Subscription Identifiers Available"));
+            }
+            if props.shared_subscription_available.is_some() {
+                return Err(err("Shared Subscription Available"));
+            }
+            if props.server_reference.is_some() {
+                return Err(err("Server Reference"));
+            }
+            if props.will_delay_interval.is_some() {
+                return Err(err("Will Delay Interval"));
+            }
+            if props.request_response_information.is_some() {
+                return Err(err("Request Response Information"));
+            }
+            if props.request_problem_information.is_some() {
+                return Err(err("Request Problem Information"));
+            }
+            if props.response_information.is_some() {
+                return Err(err("Response Information"));
+            }
         }
         _ => {
             // PingReq, PingResp don't have properties
@@ -651,7 +1051,10 @@ pub fn parse_shared_subscription(filter: &str) -> Option<SharedSubscription> {
 ///
 /// * `code` - The reason code to validate.
 /// * `packet_type` - The packet type the code is used in.
-pub fn validate_reason_code_for_packet(code: ReasonCode, packet_type: PacketType) -> Result<(), MqttError> {
+pub fn validate_reason_code_for_packet(
+    code: ReasonCode,
+    packet_type: PacketType,
+) -> Result<(), MqttError> {
     let valid = match packet_type {
         PacketType::ConnAck => is_valid_connack_reason_code(code),
         PacketType::PubAck => is_valid_puback_reason_code(code),
@@ -981,17 +1384,15 @@ pub fn validate_qos_packet_id(qos: QoS, packet_id: Option<u16>) -> Result<(), Mq
                 ));
             }
         }
-        QoS::AtLeastOnce | QoS::ExactlyOnce => {
-            match packet_id {
-                Some(id) => validate_packet_id(id)?,
-                None => {
-                    return Err(MqttError::protocol_violation(
-                        "Packet identifier is required for QoS 1 and QoS 2",
-                        None,
-                    ));
-                }
+        QoS::AtLeastOnce | QoS::ExactlyOnce => match packet_id {
+            Some(id) => validate_packet_id(id)?,
+            None => {
+                return Err(MqttError::protocol_violation(
+                    "Packet identifier is required for QoS 1 and QoS 2",
+                    None,
+                ));
             }
-        }
+        },
     }
     Ok(())
 }
@@ -1251,4 +1652,3 @@ pub fn validate_packet(packet: &Packet) -> Result<(), MqttError> {
         Packet::Auth(p) => validate_auth_packet(p),
     }
 }
-
